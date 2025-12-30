@@ -2649,6 +2649,7 @@ async function loadFlowHourlyData(selectedDate = null) {
     
     console.log('[loadFlowHourlyData] Hourly data keys:', Object.keys(hourlyData))
     console.log('[loadFlowHourlyData] Hourly data sample:', hourlyData['23:00'], hourlyData['06:00'], hourlyData['07:00'])
+    console.log('[loadFlowHourlyData] Total hours with data:', Object.keys(hourlyData).length)
     
     // Prepare chart data - Start from 6 AM
     const allHours = []
@@ -2668,10 +2669,10 @@ async function loadFlowHourlyData(selectedDate = null) {
     
     // Map data to hours starting from 6 AM
     const flowValues = allHours.map(hour => {
-      if (hourlyData[hour]) {
+      if (hourlyData[hour] && hourlyData[hour].max !== null && hourlyData[hour].min !== null) {
         const diff = hourlyData[hour].max - hourlyData[hour].min
         console.log(`[Flow] ${hour}: max=${hourlyData[hour].max}, min=${hourlyData[hour].min}, diff=${diff}`)
-        return diff
+        return diff > 0 ? diff : 0
       }
       console.log(`[Flow] ${hour}: NO DATA`)
       return 0  // No data for this hour
@@ -2679,16 +2680,18 @@ async function loadFlowHourlyData(selectedDate = null) {
     
     const orpSensor01Values = allHours.map(hour => {
       if (hourlyData[hour] && hourlyData[hour].orpSensor01Count > 0) {
-        return hourlyData[hour].orpSensor01Sum / hourlyData[hour].orpSensor01Count
+        const avg = hourlyData[hour].orpSensor01Sum / hourlyData[hour].orpSensor01Count
+        return isNaN(avg) ? 0 : avg
       }
-      return null  // No data for this hour
+      return 0  // Return 0 instead of null to prevent chart errors
     })
     
     const orpSensor02Values = allHours.map(hour => {
       if (hourlyData[hour] && hourlyData[hour].orpSensor02Count > 0) {
-        return hourlyData[hour].orpSensor02Sum / hourlyData[hour].orpSensor02Count
+        const avg = hourlyData[hour].orpSensor02Sum / hourlyData[hour].orpSensor02Count
+        return isNaN(avg) ? 0 : avg
       }
-      return null  // No data for this hour
+      return 0  // Return 0 instead of null to prevent chart errors
     })
     
     // Calculate Energy per Flow (kWh/m³)
@@ -2698,12 +2701,18 @@ async function loadFlowHourlyData(selectedDate = null) {
         const energyDiff = hourlyData[hour].energyMax - hourlyData[hour].energyMin
         
         // Only calculate if flow is not zero
-        if (flowDiff > 0) {
-          return energyDiff / flowDiff
+        if (flowDiff > 0 && energyDiff > 0) {
+          const ratio = energyDiff / flowDiff
+          return isNaN(ratio) ? 0 : ratio
         }
       }
-      return null  // No data or zero flow
+      return 0  // Return 0 instead of null to prevent chart errors
     })
+    
+    console.log('[loadFlowHourlyData] Flow values:', flowValues)
+    console.log('[loadFlowHourlyData] ORP 01 values:', orpSensor01Values)
+    console.log('[loadFlowHourlyData] ORP 02 values:', orpSensor02Values)
+    console.log('[loadFlowHourlyData] Energy/Flow values:', energyPerFlowValues)
     
     // Update chart - destroy and recreate to ensure proper rendering
     if (flowHourlyChart) {
