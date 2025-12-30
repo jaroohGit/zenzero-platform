@@ -2974,11 +2974,18 @@ let realtimeFlowEnergyData = {
   lastFlowValue: null,
   lastEnergyValue: null,
   lastUpdateHour: null,
-  hourlyAccumulation: {} // { '06:00': { flow: 100, orp01: 150, orp02: 160, energy: 50 }, ... }
+  hourlyAccumulation: {}, // { '06:00': { flow: 100, orp01: 150, orp02: 160, energy: 50 }, ... }
+  isRealtimeMode: true // Flag to control realtime updates
 }
 
 // Update Flow and Energy charts with realtime MQTT data
 function updateFlowEnergyChartsRealtime(data) {
+  // Skip realtime updates if not in realtime mode (user selected a specific date)
+  if (!realtimeFlowEnergyData.isRealtimeMode) {
+    console.log('[Dashboard] Skipping realtime update - date picker mode active')
+    return
+  }
+  
   if (!flowHourlyChart) return
   
   const now = new Date()
@@ -3102,6 +3109,9 @@ function setupDashboardHandlers() {
       if (flowChartDateInput) {
         flowChartDateInput.value = today.toISOString().split('T')[0]
       }
+      // Enable realtime mode when viewing today
+      realtimeFlowEnergyData.isRealtimeMode = true
+      realtimeFlowEnergyData.hourlyAccumulation = {}
       loadFlowHourlyData(flowChartDateInput.value)
     })
   }
@@ -3110,6 +3120,9 @@ function setupDashboardHandlers() {
   if (flowChartLoadBtn) {
     flowChartLoadBtn.addEventListener('click', () => {
       if (flowChartDateInput && flowChartDateInput.value) {
+        const today = new Date().toISOString().split('T')[0]
+        // Disable realtime mode if viewing a past date
+        realtimeFlowEnergyData.isRealtimeMode = (flowChartDateInput.value === today)
         loadFlowHourlyData(flowChartDateInput.value)
       }
     })
