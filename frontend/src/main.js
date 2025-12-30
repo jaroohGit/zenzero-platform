@@ -2559,48 +2559,52 @@ async function loadFlowHourlyData(selectedDate = null) {
   realtimeFlowEnergyData.isRealtimeMode = false
   
   try {
-    let apiUrl
-    let startTime, endTime
+    let startDate, endDate
     
     if (selectedDate) {
       // Load data for specific date from 6 AM to next day 6 AM
       const date = new Date(selectedDate)
-      startTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 6, 0, 0)
-      endTime = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 6, 0, 0)
+      const startTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 6, 0, 0)
+      const endTime = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 6, 0, 0)
       
-      // Calculate minutes between start and end
-      const minutes = Math.floor((endTime - startTime) / 60000)
-      apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${minutes}&limit=5000`
+      startDate = startTime.toISOString()
+      endDate = endTime.toISOString()
       
       console.log('[Dashboard] Loading data from', startTime.toLocaleString(), 'to', endTime.toLocaleString())
     } else {
-      // Load data for last 24 hours (default)
-      apiUrl = `${API_BASE_URL}/wwt01/history?minutes=1440&limit=5000`
+      // Load data for today from 6 AM to next day 6 AM
+      const now = new Date()
+      const startTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 6, 0, 0)
+      const endTime = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 6, 0, 0)
+      
+      startDate = startTime.toISOString()
+      endDate = endTime.toISOString()
+      
+      console.log('[Dashboard] Loading today data from', startTime.toLocaleString(), 'to', endTime.toLocaleString())
     }
     
-    const response = await fetch(apiUrl)
-    const data = await response.json()
+    const response = await fetch(`${API_BASE_URL}/wwt01/data-range?startDate=${startDate}&endDate=${endDate}`)
+    if (!response.ok) throw new Error('Failed to fetch data')
     
-    if (data.length === 0) {
+    const rows = await response.json()
+    console.log('[loadFlowHourlyData] Loaded', rows.length, 'rows from API')
+    console.log('[loadFlowHourlyData] First 3 rows:', rows.slice(0, 3))
+    console.log('[loadFlowHourlyData] Date range:', startDate, 'to', endDate)
+    
+    if (rows.length === 0) {
       console.log('[Dashboard] No flow data available')
+      // Re-enable realtime mode if it was on
+      if (wasRealtimeMode) {
+        realtimeFlowEnergyData.isRealtimeMode = true
+      }
       return
-    }
-    
-    // Filter data if specific date is selected
-    let filteredData = data
-    if (selectedDate && startTime && endTime) {
-      filteredData = data.filter(row => {
-        const rowTime = new Date(row.time)
-        return rowTime >= startTime && rowTime < endTime
-      })
-      console.log('[Dashboard] Filtered data:', filteredData.length, 'records')
     }
     
     // Group data by hour and calculate max - min for flow, average for ORP
     const hourlyData = {}
     const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
     
-    filteredData.forEach(row => {
+    rows.forEach(row => {
       const date = new Date(row.time)
       const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
       
@@ -2662,8 +2666,10 @@ async function loadFlowHourlyData(selectedDate = null) {
     const flowValues = allHours.map(hour => {
       if (hourlyData[hour]) {
         const diff = hourlyData[hour].max - hourlyData[hour].min
+        console.log(`[Flow] ${hour}: max=${hourlyData[hour].max}, min=${hourlyData[hour].min}, diff=${diff}`)
         return diff
       }
+      console.log(`[Flow] ${hour}: NO DATA`)
       return 0  // No data for this hour
     })
     
@@ -3122,10 +3128,13 @@ function setupDashboardHandlers() {
       if (flowChartDateInput) {
         flowChartDateInput.value = today.toISOString().split('T')[0]
       }
-      // Enable realtime mode when viewing today
+      // Clear realtime accumulation data and enable realtime mode
       realtimeFlowEnergyData.isRealtimeMode = true
       realtimeFlowEnergyData.hourlyAccumulation = {}
-      loadFlowHourlyData(flowChartDateInput.value)
+      realtimeFlowEnergyData.lastFlowValue = null
+      realtimeFlowEnergyData.lastEnergyValue = null
+      realtimeFlowEnergyData.lastUpdateHour = null
+      loadFlowHourlyData(null) // Load today's data
     })
   }
   
@@ -3136,6 +3145,13 @@ function setupDashboardHandlers() {
         const today = new Date().toISOString().split('T')[0]
         // Disable realtime mode if viewing a past date
         realtimeFlowEnergyData.isRealtimeMode = (flowChartDateInput.value === today)
+        if (flowChartDateInput.value !== today) {
+          // Clear realtime data when viewing past dates
+          realtimeFlowEnergyData.hourlyAccumulation = {}
+          realtimeFlowEnergyData.lastFlowValue = null
+          realtimeFlowEnergyData.lastEnergyValue = null
+          realtimeFlowEnergyData.lastUpdateHour = null
+        }
         loadFlowHourlyData(flowChartDateInput.value)
       }
     })
