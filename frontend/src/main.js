@@ -2600,33 +2600,42 @@ async function loadFlowHourlyData(selectedDate = null) {
       return
     }
     
-    try {
-      // Group data by hour and calculate max - min for flow, average for ORP
-      const hourlyData = {}
-      const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
-      
-      console.log('[loadFlowHourlyData] Processing rows...')
-      rows.forEach((row, index) => {
-        try {
-          const date = new Date(row.time)
-          const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
-          
-          if (index < 3) {
-            console.log(`[loadFlowHourlyData] Row ${index}: time=${row.time}, date=${date}, hourKey=${hourKey}`)
+    // Group data by hour and calculate max - min for flow, average for ORP
+    const hourlyData = {}
+    let datePrefix = ''
+    
+    if (selectedDate) {
+      try {
+        datePrefix = new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' '
+      } catch (e) {
+        console.error('[loadFlowHourlyData] Error formatting date prefix:', e)
+        datePrefix = ''
+      }
+    }
+    
+    console.log('[loadFlowHourlyData] Processing', rows.length, 'rows...')
+    
+    rows.forEach((row, index) => {
+      try {
+        const date = new Date(row.time)
+        const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
+        
+        if (index < 3) {
+          console.log(`[loadFlowHourlyData] Row ${index}: time=${row.time}, date=${date.toISOString()}, hourKey=${hourKey}, flow=${row.flow_meter_no1_forward}`)
+        }
+        
+        if (!hourlyData[hourKey]) {
+          hourlyData[hourKey] = {
+            max: row.flow_meter_no1_forward || 0,
+            min: row.flow_meter_no1_forward || 0,
+            orpSensor01Sum: 0,
+            orpSensor01Count: 0,
+            orpSensor02Sum: 0,
+            orpSensor02Count: 0,
+            energyMax: row.power_mdb_01_energy || 0,
+            energyMin: row.power_mdb_01_energy || 0
           }
-          
-          if (!hourlyData[hourKey]) {
-            hourlyData[hourKey] = {
-              max: row.flow_meter_no1_forward || 0,
-              min: row.flow_meter_no1_forward || 0,
-              orpSensor01Sum: 0,
-              orpSensor01Count: 0,
-              orpSensor02Sum: 0,
-              orpSensor02Count: 0,
-              energyMax: row.power_mdb_01_energy || 0,
-              energyMin: row.power_mdb_01_energy || 0
-            }
-          }
+        }
       
       // Flow data
       if (row.flow_meter_no1_forward !== null && row.flow_meter_no1_forward !== undefined) {
@@ -2651,14 +2660,17 @@ async function loadFlowHourlyData(selectedDate = null) {
         hourlyData[hourKey].energyMax = Math.max(hourlyData[hourKey].energyMax, row.power_mdb_01_energy)
         hourlyData[hourKey].energyMin = Math.min(hourlyData[hourKey].energyMin, row.power_mdb_01_energy)
       }
-        } catch (rowError) {
-          console.error('[loadFlowHourlyData] Error processing row:', rowError, row)
-        }
+      } catch (rowError) {
+        console.error('[loadFlowHourlyData] Error processing row', index, ':', rowError, row)
+      }
     })
     
     console.log('[loadFlowHourlyData] Hourly data keys:', Object.keys(hourlyData))
-    console.log('[loadFlowHourlyData] Hourly data sample:', hourlyData['23:00'], hourlyData['06:00'], hourlyData['07:00'])
     console.log('[loadFlowHourlyData] Total hours with data:', Object.keys(hourlyData).length)
+    if (Object.keys(hourlyData).length > 0) {
+      const firstKey = Object.keys(hourlyData)[0]
+      console.log('[loadFlowHourlyData] First hour sample:', firstKey, hourlyData[firstKey])
+    }
     
     // Prepare chart data - Start from 6 AM
     const allHours = []
@@ -2915,12 +2927,10 @@ async function loadFlowHourlyData(selectedDate = null) {
       flowHourlyChart = new ApexCharts(chartEl, options)
       flowHourlyChart.render()
       
-     
-    } catch (chartError) {
-      console.error('[loadFlowHourlyData] Error creating chart:', chartError)
-      throw chartError
-    } const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
+      const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
       console.log('[Dashboard] Flow Hourly chart recreated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
+    } else {
+      console.error('[loadFlowHourlyData] Chart element #flowHourlyChart not found!')
     }
     
     // Re-enable realtime mode only if viewing today
