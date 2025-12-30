@@ -1841,7 +1841,20 @@ function initPlantPerformanceCharts() {
     },
     plotOptions: {
       bar: {
-        columnWidth: '90%'
+        columnWidth: '90%',
+        dataLabels: {
+          position: 'top'
+        }
+      }
+    },
+    dataLabels: {
+      enabled: true,
+      formatter: function (val) {
+        return val ? val.toFixed(1) : '0'
+      },
+      style: {
+        fontSize: '10px',
+        colors: ['#fff']
       }
     },
     colors: ['#3b82f6', '#a855f7', '#fbbf24'],
@@ -2370,14 +2383,23 @@ function initializeFlowHourlyChart() {
     },
     dataLabels: {
       enabled: true,
-      enabledOnSeries: [0], // แสดงเฉพาะกราฟแท่ง (Flow)
+      enabledOnSeries: [0, 1, 2, 3], // แสดงทุกกราฟ (Flow, ORP 01, ORP 02, Energy/Flow)
       formatter: function (val) {
         return val ? val.toFixed(2) : '0.00'
       },
       offsetY: -20,
       style: {
-        fontSize: '11px',
+        fontSize: '10px',
         colors: [isDark ? '#cbd5e1' : '#0f172a']
+      },
+      background: {
+        enabled: true,
+        foreColor: isDark ? '#1e293b' : '#ffffff',
+        borderRadius: 2,
+        padding: 4,
+        opacity: 0.9,
+        borderWidth: 1,
+        borderColor: isDark ? '#475569' : '#cbd5e1'
       }
     },
     stroke: {
