@@ -2703,27 +2703,29 @@ async function loadFlowHourlyData(selectedDate = null) {
     
     // Update chart
     if (flowHourlyChart && flowHourlyChart.w) {
-      // Update categories without triggering re-render
-      flowHourlyChart.w.config.xaxis.categories = displayLabels
-      
-      // Update series data
-      flowHourlyChart.updateSeries([{
-        name: 'Flow Accumulation',
-        type: 'bar',
-        data: flowValues
-      }, {
-        name: 'ORP Sensor 01',
-        type: 'line',
-        data: orpSensor01Values
-      }, {
-        name: 'ORP Sensor 02',
-        type: 'line',
-        data: orpSensor02Values
-      }, {
-        name: 'Energy/Flow (kWh/m³)',
-        type: 'line',
-        data: energyPerFlowValues
-      }], false, true)
+      // Use updateOptions to update both categories and series together
+      flowHourlyChart.updateOptions({
+        xaxis: {
+          categories: displayLabels
+        },
+        series: [{
+          name: 'Flow Accumulation',
+          type: 'bar',
+          data: flowValues
+        }, {
+          name: 'ORP Sensor 01',
+          type: 'line',
+          data: orpSensor01Values
+        }, {
+          name: 'ORP Sensor 02',
+          type: 'line',
+          data: orpSensor02Values
+        }, {
+          name: 'Energy/Flow (kWh/m³)',
+          type: 'line',
+          data: energyPerFlowValues
+        }]
+      }, false, true, true)
       
       const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
       console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
