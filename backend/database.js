@@ -280,6 +280,44 @@ async function getLatestWWT01Data() {
   }
 }
 
+// Get WWT01 data by date range
+async function getWWT01DataRange(startDate, endDate) {
+  const query = `
+    SELECT time,
+           ph_sensor_01, orp_sensor_01, temp_01,
+           ph_sensor_02, orp_sensor_02, temp_02,
+           ph_sensor_03, orp_sensor_03, temp_03,
+           ph_sensor_04, orp_sensor_04, temp_04,
+           ph_sensor_05, orp_sensor_05, temp_05,
+           ph_sensor_06, orp_sensor_06, temp_06,
+           flow_meter_no4_realtime, flow_meter_no4_forward,
+           flow_meter_no1_realtime, flow_meter_no1_forward,
+           flow_meter_no2_realtime, flow_meter_no2_forward,
+           flow_meter_no3_realtime, flow_meter_no3_forward,
+           power_mdb_01_current, power_mdb_01_active_power, power_mdb_01_energy,
+           power_mdb_02_current, power_mdb_02_active_power, power_mdb_02_energy,
+           power_mdb_03_current, power_mdb_03_active_power, power_mdb_03_energy,
+           turbo_at01_output_power, turbo_at01_motor_current, turbo_at01_flow_rate,
+           turbo_at02_fab07_output_power, turbo_at02_fab07_flow_rate, 
+           turbo_at02_fab07_motor_current, turbo_at02_fab07_running_time,
+           turbo_at02_fab08_output_power, turbo_at02_fab08_flow_rate,
+           turbo_at02_fab08_motor_current, turbo_at02_fab08_running_time,
+           turbo_at02_gab05_output_power, turbo_at02_gab05_flow_rate,
+           turbo_at02_gab05_motor_current, turbo_at02_gab05_running_time
+    FROM wwt01_data
+    WHERE time >= $1 AND time < $2
+    ORDER BY time ASC
+  `
+  
+  try {
+    const result = await pool.query(query, [startDate, endDate])
+    return result.rows
+  } catch (err) {
+    console.error('Error getting WWT01 data range:', err)
+    throw err
+  }
+}
+
 module.exports = {
   pool,
   insertPHSensor02,
@@ -288,5 +326,6 @@ module.exports = {
   getPHSensor02Aggregated,
   getLatestPHSensor02,
   getWWT01Data,
-  getLatestWWT01Data
+  getLatestWWT01Data,
+  getWWT01DataRange
 }

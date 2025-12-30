@@ -159,6 +159,21 @@ app.get('/api/wwt01/history', async (req, res) => {
   }
 })
 
+app.get('/api/wwt01/data-range', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query
+    
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'startDate and endDate are required' })
+    }
+    
+    const data = await db.getWWT01DataRange(startDate, endDate)
+    res.json(data)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
 app.get('/api/wwt01/latest', async (req, res) => {
   try {
     const data = await db.getLatestWWT01Data()
