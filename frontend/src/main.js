@@ -2785,8 +2785,11 @@ async function loadFlowHourlyData(selectedDate = null) {
         },
         dataLabels: {
           enabled: true,
-          enabledOnSeries: [0, 1, 2, 3],
+          enabledOnSeries: [0],
           offsetY: -5,
+          formatter: function(val) {
+            return val ? val.toFixed(1) : '0'
+          },
           style: {
             fontSize: '10px',
             colors: [isDark ? '#cbd5e1' : '#0f172a']
@@ -2882,22 +2885,22 @@ async function loadFlowHourlyData(selectedDate = null) {
           y: [
             {
               formatter: function (val) {
-                return val ? val.toFixed(2) + ' m³' : '0 m³'
+                return val ? val.toFixed(1) + ' m³' : '0 m³'
               }
             },
             {
               formatter: function (val) {
-                return val ? val.toFixed(1) + ' mV' : '0 mV'
+                return val ? val.toFixed(0) + ' mV' : '0 mV'
               }
             },
             {
               formatter: function (val) {
-                return val ? val.toFixed(1) + ' mV' : '0 mV'
+                return val ? val.toFixed(0) + ' mV' : '0 mV'
               }
             },
             {
               formatter: function (val) {
-                return val ? val.toFixed(3) + ' kWh/m³' : '0 kWh/m³'
+                return val ? val.toFixed(2) + ' kWh/m³' : '0 kWh/m³'
               }
             }
           ]
@@ -2933,18 +2936,18 @@ async function loadFlowHourlyData(selectedDate = null) {
       console.error('[loadFlowHourlyData] Chart element #chart-flow-hourly not found!')
     }
     
-    // Re-enable realtime mode only if viewing today
-    const today = new Date().toISOString().split('T')[0]
-    if (!selectedDate || selectedDate === today) {
-      realtimeFlowEnergyData.isRealtimeMode = true
-    }
+    // Keep realtime mode disabled
+    // const today = new Date().toISOString().split('T')[0]
+    // if (!selectedDate || selectedDate === today) {
+    //   realtimeFlowEnergyData.isRealtimeMode = true
+    // }
     
   } catch (error) {
     console.error('[Dashboard] Error loading flow hourly data:', error)
-    // Restore realtime mode on error if it was enabled
-    if (wasRealtimeMode) {
-      realtimeFlowEnergyData.isRealtimeMode = wasRealtimeMode
-    }
+    // Keep realtime mode disabled
+    // if (wasRealtimeMode) {
+    //   realtimeFlowEnergyData.isRealtimeMode = wasRealtimeMode
+    // }
   }
 }
 
@@ -3198,7 +3201,7 @@ let realtimeFlowEnergyData = {
   lastEnergyValue: null,
   lastUpdateHour: null,
   hourlyAccumulation: {}, // { '06:00': { flow: 100, orp01: 150, orp02: 160, energy: 50 }, ... }
-  isRealtimeMode: true // Flag to control realtime updates
+  isRealtimeMode: false // DISABLED: Flag to control realtime updates
 }
 
 // Update Flow and Energy charts with realtime MQTT data
@@ -3332,8 +3335,8 @@ function setupDashboardHandlers() {
       if (flowChartDateInput) {
         flowChartDateInput.value = today.toISOString().split('T')[0]
       }
-      // Clear realtime accumulation data and enable realtime mode
-      realtimeFlowEnergyData.isRealtimeMode = true
+      // Clear realtime accumulation data (realtime mode disabled)
+      // realtimeFlowEnergyData.isRealtimeMode = true
       realtimeFlowEnergyData.hourlyAccumulation = {}
       realtimeFlowEnergyData.lastFlowValue = null
       realtimeFlowEnergyData.lastEnergyValue = null
@@ -3347,8 +3350,8 @@ function setupDashboardHandlers() {
     flowChartLoadBtn.addEventListener('click', () => {
       if (flowChartDateInput && flowChartDateInput.value) {
         const today = new Date().toISOString().split('T')[0]
-        // Disable realtime mode if viewing a past date
-        realtimeFlowEnergyData.isRealtimeMode = (flowChartDateInput.value === today)
+        // Keep realtime mode disabled
+        // realtimeFlowEnergyData.isRealtimeMode = (flowChartDateInput.value === today)
         if (flowChartDateInput.value !== today) {
           // Clear realtime data when viewing past dates
           realtimeFlowEnergyData.hourlyAccumulation = {}
