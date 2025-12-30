@@ -474,8 +474,9 @@ function connectMQTT() {
         if (currentPage === 'wwt-report' && topic === 'zenzero/wwt01') {
           updateWWT01Display(data)
         } else if (currentPage === 'dashboard' && topic === 'zenzero/wwt01') {
-          // Update dashboard with Lohand charts
+          // Update dashboard with Lohand charts and Flow/Energy charts
           updateLohandCharts(data)
+          updateFlowEnergyChartsRealtime(data)
         } else if (currentPage === 'orp-analysis' && topic === 'zenzero/wwt01') {
           // Update ORP Analysis
           updateORPAnalysisRealtime(data)
@@ -2919,6 +2920,122 @@ function updateLohandCharts(data) {
   if (statusEl && hasReceivedData) {
     statusEl.textContent = `Live | Last update: ${new Date().toLocaleTimeString()}`
   }
+}
+
+// Store realtime flow and energy data for hourly accumulation
+let realtimeFlowEnergyData = {
+  lastFlowValue: null,
+  lastEnergyValue: null,
+  lastUpdateHour: null,
+  hourlyAccumulation: {} // { '06:00': { flow: 100, orp01: 150, orp02: 160, energy: 50 }, ... }
+}
+
+// Update Flow and Energy charts with realtime MQTT data
+function updateFlowEnergyChartsRealtime(data) {
+  if (!flowHourlyChart) return
+  
+  const now = new Date()
+  const currentHour = `${now.getHours().toString().padStart(2, '0')}:00`
+  
+  // Initialize hour data if not exists
+  if (!realtimeFlowEnergyData.hourlyAccumulation[currentHour]) {
+    realtimeFlowEnergyData.hourlyAccumulation[currentHour] = {
+      flowDiff: 0,
+      orp01Sum: 0,
+      orp01Count: 0,
+      orp02Sum: 0,
+      orp02Count: 0,
+      energyDiff: 0,
+      energyPerFlow: null
+    }
+  }
+  
+  const hourData = realtimeFlowEnergyData.hourlyAccumulation[currentHour]
+  
+  // Calculate flow accumulation difference for current hour
+  if (data.Flow_Meter_No1_Forward !== null && data.Flow_Meter_No1_Forward !== undefined) {
+    if (realtimeFlowEnergyData.lastFlowValue !== null && realtimeFlowEnergyData.lastUpdateHour === currentHour) {
+      const flowDiff = data.Flow_Meter_No1_Forward - realtimeFlowEnergyData.lastFlowValue
+      if (flowDiff > 0) {
+        hourData.flowDiff += flowDiff
+      }
+    }
+    realtimeFlowEnergyData.lastFlowValue = data.Flow_Meter_No1_Forward
+    realtimeFlowEnergyData.lastUpdateHour = currentHour
+  }
+  
+  // Update ORP averages
+  if (data.ORP_Sensor_01 !== null && data.ORP_Sensor_01 !== undefined) {
+    hourData.orp01Sum += data.ORP_Sensor_01
+    hourData.orp01Count++
+  }
+  
+  if (data.ORP_Sensor_02 !== null && data.ORP_Sensor_02 !== undefined) {
+    hourData.orp02Sum += data.ORP_Sensor_02
+    hourData.orp02Count++
+  }
+  
+  // Calculate energy accumulation difference for current hour
+  if (data.Power_MDB_01_Energy !== null && data.Power_MDB_01_Energy !== undefined) {
+    if (realtimeFlowEnergyData.lastEnergyValue !== null && realtimeFlowEnergyData.lastUpdateHour === currentHour) {
+      const energyDiff = data.Power_MDB_01_Energy - realtimeFlowEnergyData.lastEnergyValue
+      if (energyDiff > 0) {
+        hourData.energyDiff += energyDiff
+      }
+    }
+    realtimeFlowEnergyData.lastEnergyValue = data.Power_MDB_01_Energy
+  }
+  
+  // Calculate Energy per Flow
+  if (hourData.flowDiff > 0) {
+    hourData.energyPerFlow = hourData.energyDiff / hourData.flowDiff
+  }
+  
+  // Prepare chart data - Start from 6 AM
+  const allHours = []
+  for (let i = 0; i < 24; i++) {
+    const hour = (6 + i) % 24
+    allHours.push(`${hour.toString().padStart(2, '0')}:00`)
+  }
+  
+  // Map accumulated data to chart
+  const flowValues = allHours.map(hour => realtimeFlowEnergyData.hourlyAccumulation[hour]?.flowDiff || 0)
+  const orp01Values = allHours.map(hour => {
+    const h = realtimeFlowEnergyData.hourlyAccumulation[hour]
+    return (h && h.orp01Count > 0) ? (h.orp01Sum / h.orp01Count) : null
+  })
+  const orp02Values = allHours.map(hour => {
+    const h = realtimeFlowEnergyData.hourlyAccumulation[hour]
+    return (h && h.orp02Count > 0) ? (h.orp02Sum / h.orp02Count) : null
+  })
+  const energyPerFlowValues = allHours.map(hour => realtimeFlowEnergyData.hourlyAccumulation[hour]?.energyPerFlow || null)
+  
+  // Update chart
+  flowHourlyChart.updateOptions({
+    xaxis: {
+      categories: allHours
+    }
+  })
+  
+  flowHourlyChart.updateSeries([{
+    name: 'Flow Accumulation',
+    type: 'bar',
+    data: flowValues
+  }, {
+    name: 'ORP Sensor 01',
+    type: 'line',
+    data: orp01Values
+  }, {
+    name: 'ORP Sensor 02',
+    type: 'line',
+    data: orp02Values
+  }, {
+    name: 'Energy/Flow (kWh/m³)',
+    type: 'line',
+    data: energyPerFlowValues
+  }])
+  
+  console.log('[Dashboard] Flow/Energy charts updated with realtime data for hour:', currentHour)
 }
 
 // Setup Dashboard Handlers
