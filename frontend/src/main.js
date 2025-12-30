@@ -524,7 +524,15 @@ const pages = {
 
       <!-- Flow Accumulation Hourly Chart (แถวแรก) -->
       <div class="card chart-container full-width" style="margin-bottom: 20px;">
-        <h3 class="chart-section-header">Flow Meter No.1 - Hourly Accumulation Comparison</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 class="chart-section-header" style="margin: 0;">Flow Meter No.1 - Hourly Accumulation Comparison</h3>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="filter-label">Select Date:</label>
+            <input type="date" id="flow-chart-date" class="filter-select" style="padding: 8px;" />
+            <button id="flow-chart-today-btn" class="btn-primary" style="padding: 8px 15px;">Today</button>
+            <button id="flow-chart-load-btn" class="btn-primary" style="padding: 8px 15px;">Load</button>
+          </div>
+        </div>
         <div style="padding: 10px;">
           <div id="chart-flow-hourly" style="width: 100%; height: 400px;"></div>
         </div>
@@ -2543,12 +2551,29 @@ function initializeFlowHourlyChart() {
 }
 
 // Load and Update Flow Hourly Data
-async function loadFlowHourlyData() {
-  console.log('[Dashboard] Loading Flow Hourly data...')
+async function loadFlowHourlyData(selectedDate = null) {
+  console.log('[Dashboard] Loading Flow Hourly data...', selectedDate ? 'for date: ' + selectedDate : '')
   
   try {
-    // Load data for last 24 hours
-    const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=1440&limit=5000`
+    let apiUrl
+    let startTime, endTime
+    
+    if (selectedDate) {
+      // Load data for specific date from 6 AM to next day 6 AM
+      const date = new Date(selectedDate)
+      startTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 6, 0, 0)
+      endTime = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1, 6, 0, 0)
+      
+      // Calculate minutes between start and end
+      const minutes = Math.floor((endTime - startTime) / 60000)
+      apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${minutes}&limit=5000`
+      
+      console.log('[Dashboard] Loading data from', startTime.toLocaleString(), 'to', endTime.toLocaleString())
+    } else {
+      // Load data for last 24 hours (default)
+      apiUrl = `${API_BASE_URL}/wwt01/history?minutes=1440&limit=5000`
+    }
+    
     const response = await fetch(apiUrl)
     const data = await response.json()
     
@@ -2557,10 +2582,21 @@ async function loadFlowHourlyData() {
       return
     }
     
+    // Filter data if specific date is selected
+    let filteredData = data
+    if (selectedDate && startTime && endTime) {
+      filteredData = data.filter(row => {
+        const rowTime = new Date(row.time)
+        return rowTime >= startTime && rowTime < endTime
+      })
+      console.log('[Dashboard] Filtered data:', filteredData.length, 'records')
+    }
+    
     // Group data by hour and calculate max - min for flow, average for ORP
     const hourlyData = {}
+    const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
     
-    data.forEach(row => {
+    filteredData.forEach(row => {
       const date = new Date(row.time)
       const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
       
@@ -2604,9 +2640,18 @@ async function loadFlowHourlyData() {
     
     // Prepare chart data - Start from 6 AM
     const allHours = []
+    const displayLabels = []
     for (let i = 0; i < 24; i++) {
       const hour = (6 + i) % 24  // Start from 6 AM
-      allHours.push(`${hour.toString().padStart(2, '0')}:00`)
+      const hourKey = `${hour.toString().padStart(2, '0')}:00`
+      allHours.push(hourKey)
+      
+      // Add date prefix to first hour (06:00) or when crossing midnight
+      if (i === 0 || hour === 0) {
+        displayLabels.push(datePrefix + hourKey)
+      } else {
+        displayLabels.push(hourKey)
+      }
     }
     
     // Map data to hours starting from 6 AM
@@ -2650,7 +2695,7 @@ async function loadFlowHourlyData() {
     if (flowHourlyChart) {
       flowHourlyChart.updateOptions({
         xaxis: {
-          categories: allHours
+          categories: displayLabels
         }
       })
       flowHourlyChart.updateSeries([{
@@ -2670,7 +2715,9 @@ async function loadFlowHourlyData() {
         type: 'line',
         data: energyPerFlowValues
       }])
-      console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM) + ORP lines')
+      
+      const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
+      console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
     }
     
   } catch (error) {
@@ -3042,17 +3089,49 @@ function updateFlowEnergyChartsRealtime(data) {
 function setupDashboardHandlers() {
   const reloadBtn = document.getElementById('dashboard-reload-btn')
   const timeRangeSelect = document.getElementById('dashboard-time-range')
+  const flowChartDateInput = document.getElementById('flow-chart-date')
+  const flowChartTodayBtn = document.getElementById('flow-chart-today-btn')
+  const flowChartLoadBtn = document.getElementById('flow-chart-load-btn')
+  
+  // Set default date to today
+  if (flowChartDateInput) {
+    const today = new Date()
+    flowChartDateInput.value = today.toISOString().split('T')[0]
+  }
+  
+  // Today button handler
+  if (flowChartTodayBtn) {
+    flowChartTodayBtn.addEventListener('click', () => {
+      const today = new Date()
+      if (flowChartDateInput) {
+        flowChartDateInput.value = today.toISOString().split('T')[0]
+      }
+      loadFlowHourlyData(flowChartDateInput.value)
+    })
+  }
+  
+  // Load button handler for date selection
+  if (flowChartLoadBtn) {
+    flowChartLoadBtn.addEventListener('click', () => {
+      if (flowChartDateInput && flowChartDateInput.value) {
+        loadFlowHourlyData(flowChartDateInput.value)
+      }
+    })
+  }
   
   if (reloadBtn) {
     reloadBtn.addEventListener('click', () => {
-      loadFlowHourlyData()
+      // Reload with current selected date if any
+      const selectedDate = flowChartDateInput?.value
+      loadFlowHourlyData(selectedDate || null)
       loadDashboardHistoricalData()
     })
   }
   
   if (timeRangeSelect) {
     timeRangeSelect.addEventListener('change', () => {
-      loadFlowHourlyData()
+      const selectedDate = flowChartDateInput?.value
+      loadFlowHourlyData(selectedDate || null)
       loadDashboardHistoricalData()
     })
   }
