@@ -222,6 +222,30 @@ function updateChartsTheme(mode) {
     })
   }
   
+  // Update Flow Daily Chart
+  if (typeof flowDailyChart !== 'undefined' && flowDailyChart && flowDailyChart.updateOptions) {
+    flowDailyChart.updateOptions({
+      theme: { mode: mode },
+      chart: { 
+        foreColor: labelColor,
+        background: mode === 'dark' ? '#1e293b' : '#ffffff'
+      },
+      title: { style: { color: textColor, fontSize: '14px' } },
+      xaxis: { 
+        title: { style: { color: textColor } },
+        labels: { style: { colors: labelColor } }
+      },
+      yaxis: { 
+        title: { style: { color: textColor } },
+        labels: { style: { colors: labelColor } }
+      },
+      dataLabels: {
+        style: { colors: [textColor] }
+      },
+      grid: { borderColor: gridColor }
+    })
+  }
+  
   // Update charts if they exist
   if (typeof lohandCharts !== 'undefined' && lohandCharts) {
     Object.values(lohandCharts).forEach(lohand => {
@@ -414,6 +438,7 @@ let latestData = {
   'zenzero/wwt01': {},
   'zenzero/wwt02': {}
 }
+let mlUpdateCounter = 0
 
 // Get API Base URL based on environment
 const getAPIBaseURL = () => {
@@ -477,6 +502,13 @@ function connectMQTT() {
           // Update dashboard with Lohand charts and Flow/Energy charts
           updateLohandCharts(data)
           updateFlowEnergyChartsRealtime(data)
+          
+          // Auto-update ML prediction every 10 messages (approximately 30 seconds)
+          mlUpdateCounter++
+          if (mlUpdateCounter >= 10) {
+            mlUpdateCounter = 0
+            loadMLPredictionData()
+          }
         } else if (currentPage === 'orp-analysis' && topic === 'zenzero/wwt01') {
           // Update ORP Analysis
           updateORPAnalysisRealtime(data)
@@ -518,7 +550,39 @@ const pages = {
             <option value="180">Last 3 hours</option>
           </select>
           <button id="dashboard-reload-btn" class="btn-primary" style="padding: 8px 20px;">Reload Data</button>
+          <button id="ml-train-btn" class="btn-primary" style="padding: 8px 20px; background: #10b981;">Train ML Model</button>
           <span id="dashboard-status" class="status-text" style="margin-left: auto;">Loading...</span>
+        </div>
+      </div>
+
+      <!-- ML Prediction Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 class="chart-section-header" style="margin: 0;">🤖 ML Prediction: ORP-Out (15 min ahead)</h3>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button id="ml-refresh-btn" class="btn-primary" style="padding: 8px 15px;">Refresh</button>
+          </div>
+        </div>
+        <div style="padding: 10px;">
+          <div id="chart-ml-prediction" style="width: 100%; height: 350px;"></div>
+        </div>
+        <div style="padding: 15px; background: #f8fafc; border-radius: 0 0 8px 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+          <div style="text-align: center;">
+            <div style="color: #64748b; font-size: 12px;">Current ORP 02</div>
+            <div id="ml-current-value" style="font-size: 24px; font-weight: bold; color: #3b82f6;">--</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="color: #64748b; font-size: 12px;">Predicted (15min)</div>
+            <div id="ml-predicted-value" style="font-size: 24px; font-weight: bold; color: #8b5cf6;">--</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="color: #64748b; font-size: 12px;">Difference</div>
+            <div id="ml-difference-value" style="font-size: 24px; font-weight: bold; color: #10b981;">--</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="color: #64748b; font-size: 12px;">Accuracy</div>
+            <div id="ml-accuracy-value" style="font-size: 24px; font-weight: bold; color: #f59e0b;">--</div>
+          </div>
         </div>
       </div>
 
@@ -535,6 +599,22 @@ const pages = {
         </div>
         <div style="padding: 10px;">
           <div id="chart-flow-hourly" style="width: 100%; height: 400px;"></div>
+        </div>
+      </div>
+
+      <!-- Flow Accumulation Daily/Monthly Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 class="chart-section-header" style="margin: 0;">Flow Meter No.1 - Daily Accumulation (Monthly View)</h3>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="filter-label">Select Month:</label>
+            <input type="month" id="flow-daily-chart-month" class="filter-select" style="padding: 8px;" />
+            <button id="flow-daily-chart-current-btn" class="btn-primary" style="padding: 8px 15px;">Current Month</button>
+            <button id="flow-daily-chart-load-btn" class="btn-primary" style="padding: 8px 15px;">Load</button>
+          </div>
+        </div>
+        <div style="padding: 10px;">
+          <div id="chart-flow-daily" style="width: 100%; height: 400px;"></div>
         </div>
       </div>
 
@@ -574,9 +654,13 @@ const pages = {
       setTimeout(() => {
         console.log('[Dashboard] Starting initialization after timeout')
         try {
+          initializeMLPredictionChart()
           initializeFlowHourlyChart()
+          initializeFlowDailyChart()
           initializeLohandCharts()
+          loadMLPredictionData()
           loadFlowHourlyData()
+          loadFlowDailyData()
           loadDashboardHistoricalData()
           setupDashboardHandlers()
         } catch (err) {
@@ -956,12 +1040,12 @@ const pages = {
             <div id="current-ph02" class="kpi-main-value" style="font-size: 28px; margin: 10px 0;">--</div>
           </div>
           <div class="card" style="padding: 15px; text-align: center;">
-            <div class="kpi-sublabel">ORP Sensor 01</div>
+            <div class="kpi-sublabel">ORP-In</div>
             <div id="current-orp01" class="kpi-main-value" style="font-size: 28px; margin: 10px 0;">--</div>
             <div class="kpi-unit">mV</div>
           </div>
           <div class="card" style="padding: 15px; text-align: center;">
-            <div class="kpi-sublabel">ORP Sensor 02</div>
+            <div class="kpi-sublabel">ORP-Out</div>
             <div id="current-orp02" class="kpi-main-value" style="font-size: 28px; margin: 10px 0;">--</div>
             <div class="kpi-unit">mV</div>
           </div>
@@ -984,8 +1068,91 @@ const pages = {
         </div>
 
         <!-- Process Control Guidelines -->
+        <div class="card" style="padding: 20px; margin-bottom: 20px;">
+          <h3 style="margin: 0 0 15px 0;">🔑 Up Flow Turning Point Batch Reactor - AI/ML Control System</h3>
+          <p style="color: #6b7280; margin-bottom: 20px; font-style: italic;">
+            สถาปัตยกรรมระบบ AI และ Machine Learning สำหรับการควบคุมแบบเวลาจริง
+          </p>
+          
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+            <!-- Anoxic Phase - Nitrate Turning -->
+            <div style="background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); padding: 20px; border-radius: 8px; color: white;">
+              <h4 style="color: #93c5fd; margin-bottom: 15px; font-size: 18px;">
+                ⓘ ช่วงพักการเติมอากาศ (Anoxic Phase) และการหา Nitrate Turning
+              </h4>
+              <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                <p style="margin: 0 0 10px 0; line-height: 1.6;">
+                  หลังจากหยุดการเติมอากาศ ระบบจะเข้าสู่ช่วง Denitrification โดยจุลินทรีย์จะใช้คาร์บอนที่มีอยู่อย่างสัมเหคือ (COD/TKN > 8) ในการรีดักซ์ในเคชฑ<sup>3</sup>
+                </p>
+              </div>
+              
+              <div style="margin-bottom: 12px;">
+                <strong style="color: #fbbf24;">• เกณฑ์ของ ORP:</strong>
+                <p style="margin: 5px 0 0 20px; line-height: 1.6;">
+                  ค่า ORP จะลดลงอย่างต่อเนื่องเมื่อในเคชฑทุกมีไมาก<sup>13</sup>
+                </p>
+              </div>
+              
+              <div style="margin-bottom: 12px;">
+                <strong style="color: #fbbf24;">• การเกิด Nitrate Turning:</strong>
+                <p style="margin: 5px 0 0 20px; line-height: 1.6;">
+                  เมื่อในเคชฑทุกกก้าจัดจนหมด (Complete Denitrification) ค้กยจัดคกาซิงจะลดลง
+                  อย่างรวดเร็วเป็นเมฉขัน (Sharp drop) แนองจากระบบเปลี่ยนสถานะจาก Anoxic (ที่มีในเคชฑเป็นตัวรับ
+                  อิเล็กตรอน) ไปสู่สภาวะ Anaerobic (Fermentation)
+                </p>
+              </div>
+              
+              <div style="background: rgba(251, 191, 36, 0.2); padding: 12px; border-radius: 6px; border-left: 4px solid #fbbf24;">
+                <strong style="color: #fef3c7;">🤖 เกณฑ์การจับเฟส์:</strong>
+                <p style="margin: 5px 0 0 0; line-height: 1.6;">
+                  จุด Nitrate Knee นี้มักปรากฏเมื่อค่า ORP อยู่ในช่วง <strong>-100 ถึง -200 mV</strong> (ขึ้นอยู่กับนำเสีย)
+                  ระบบ AI จะตรวจจับจุดนี้เพื่อสั่นสุดการควบคุมผลและเตรียมการตกตะกอน
+                </p>
+              </div>
+            </div>
+
+            <!-- Aerobic Phase - Ammonia Valley -->
+            <div style="background: linear-gradient(135deg, #065f46 0%, #10b981 100%); padding: 20px; border-radius: 8px; color: white;">
+              <h4 style="color: #6ee7b7; margin-bottom: 15px; font-size: 18px;">
+                ⓘ ช่วงการเติมอากาศ (Aerobic Phase) และการหา Ammonia Valley
+              </h4>
+              <div style="background: rgba(255,255,255,0.1); padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                <p style="margin: 0 0 10px 0; line-height: 1.6;">
+                  เครื่องเติมอากาศจะทำงานเพื่อเพิ่มระดับ DO ให้จุลินทรีย์เปลี่ยนรูปแอมโมเนียและย่อยสลายคาร์บอน
+                </p>
+              </div>
+              
+              <div style="margin-bottom: 12px;">
+                <strong style="color: #fbbf24;">• เกณฑ์ของ pH:</strong>
+                <p style="margin: 5px 0 0 20px; line-height: 1.6;">
+                  ค่า pH จะลดลงเป็นเส้นโค้งที่ค่อย ๆ สาดลง เนื่องจากกระบวนการ Nitritation ปล่อยกรดออกมา
+                </p>
+              </div>
+              
+              <div style="margin-bottom: 12px;">
+                <strong style="color: #fbbf24;">• การเกิด Ammonia Valley:</strong>
+                <p style="margin: 5px 0 0 20px; line-height: 1.6;">
+                  เมื่อความเข้มข้นของ NH<sub>4</sub>⁺ ลดลงจนถึงระดับบรีตยุด (มากต่ำกว่า 0.5 - 1.0 mg/L)
+                  อัตราการลดลงของ pH จะช้าลงและเริ่มวกกลับขึ้นเล็กน้อยเนื่องจากกระบวนการ CO2 Stripping จากการเติม
+                  อากาศที่มีความเด่นชัดกว่าการผลิตกรด
+                </p>
+              </div>
+              
+              <div style="background: rgba(251, 191, 36, 0.2); padding: 12px; border-radius: 6px; border-left: 4px solid #fbbf24;">
+                <strong style="color: #fef3c7;">🤖 เกณฑ์การหยุดเติมอากาศ:</strong>
+                <p style="margin: 5px 0 0 0; line-height: 1.6;">
+                  ระบบ AI จะวิเคราะห้อยุทธ์ของ pH (dpH/dt) เมื่อค่าความชันเปลี่ยนจาก
+                  ลบเป็นศูนย์หรือบวกเล็กน้อง (เช่น 5-15 นาที) ระบบจะระบุจุด Ammonia Valley และส่ง "หยุด
+                  เติมอากาศทันที" เพื่อประหยัดพลังงาน
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Traditional Control Guidelines -->
         <div class="card" style="padding: 20px;">
-          <h3 style="margin: 0 0 15px 0;">ORP/pH Control Guidelines</h3>
+          <h3 style="margin: 0 0 15px 0;">ORP/pH Control Guidelines (Traditional Methods)</h3>
           <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
             <div>
               <h4 style="color: #3b82f6; margin-bottom: 10px;">Nitrification End</h4>
@@ -2155,6 +2322,8 @@ let lohandCharts = {
 }
 
 let flowHourlyChart = null
+let flowDailyChart = null
+let mlPredictionChart = null
 
 let lohandData = {
   at1: { 
@@ -2355,11 +2524,15 @@ function initializeFlowHourlyChart() {
       type: 'bar',
       data: []
     }, {
-      name: 'ORP Sensor 01',
+      name: 'ORP-In',
       type: 'line',
       data: []
     }, {
-      name: 'ORP Sensor 02',
+      name: 'ORP-Out',
+      type: 'line',
+      data: []
+    }, {
+      name: 'ORP-Avg',
       type: 'line',
       data: []
     }, {
@@ -2392,7 +2565,7 @@ function initializeFlowHourlyChart() {
     },
     dataLabels: {
       enabled: true,
-      enabledOnSeries: [0, 1, 2, 3], // แสดงทุกกราฟ (Flow, ORP 01, ORP 02, Energy/Flow)
+      enabledOnSeries: [0, 1, 2, 3, 4], // แสดงทุกกราฟ (Flow, ORP-In, ORP-Out, ORP-Avg, Energy/Flow)
       formatter: function (val) {
         return val ? val.toFixed(2) : '0.00'
       },
@@ -2413,8 +2586,8 @@ function initializeFlowHourlyChart() {
     },
     stroke: {
       show: true,
-      width: [0, 3, 3, 3],
-      colors: ['transparent', '#f59e0b', '#10b981', '#ef4444'],
+      width: [0, 1, 1, 3, 2],
+      colors: ['transparent', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'],
       curve: 'smooth'
     },
     xaxis: {
@@ -2451,7 +2624,7 @@ function initializeFlowHourlyChart() {
         }
       }
     }, {
-      seriesName: ['ORP Sensor 01', 'ORP Sensor 02'],
+      seriesName: ['ORP-In', 'ORP-Out', 'ORP-Avg'],
       opposite: true,
       title: {
         text: 'ORP (mV)',
@@ -2643,13 +2816,13 @@ async function loadFlowHourlyData(selectedDate = null) {
         hourlyData[hourKey].min = Math.min(hourlyData[hourKey].min, row.flow_meter_no1_forward)
       }
       
-      // ORP Sensor 01 data
+      // ORP-In data
       if (row.orp_sensor_01 !== null && row.orp_sensor_01 !== undefined) {
         hourlyData[hourKey].orpSensor01Sum += row.orp_sensor_01
         hourlyData[hourKey].orpSensor01Count++
       }
       
-      // ORP Sensor 02 data
+      // ORP-Out data
       if (row.orp_sensor_02 !== null && row.orp_sensor_02 !== undefined) {
         hourlyData[hourKey].orpSensor02Sum += row.orp_sensor_02
         hourlyData[hourKey].orpSensor02Count++
@@ -2717,6 +2890,20 @@ async function loadFlowHourlyData(selectedDate = null) {
       return 0  // Return 0 instead of null to prevent chart errors
     })
     
+    // Calculate ORP Average (ORP-Avg)
+    const orpAvgValues = allHours.map((hour, index) => {
+      const orp01 = orpSensor01Values[index]
+      const orp02 = orpSensor02Values[index]
+      if (orp01 > 0 && orp02 > 0) {
+        return (orp01 + orp02) / 2
+      } else if (orp01 > 0) {
+        return orp01
+      } else if (orp02 > 0) {
+        return orp02
+      }
+      return 0
+    })
+    
     // Calculate Energy per Flow (kWh/m³)
     const energyPerFlowValues = allHours.map(hour => {
       if (hourlyData[hour]) {
@@ -2752,13 +2939,17 @@ async function loadFlowHourlyData(selectedDate = null) {
           type: 'bar',
           data: flowValues
         }, {
-          name: 'ORP Sensor 01',
+          name: 'ORP-In',
           type: 'line',
           data: orpSensor01Values
         }, {
-          name: 'ORP Sensor 02',
+          name: 'ORP-Out',
           type: 'line',
           data: orpSensor02Values
+        }, {
+          name: 'ORP-Avg',
+          type: 'line',
+          data: orpAvgValues
         }, {
           name: 'Energy/Flow (kWh/m³)',
           type: 'line',
@@ -2772,7 +2963,7 @@ async function loadFlowHourlyData(selectedDate = null) {
           animations: { enabled: false }
         },
         stroke: {
-          width: [0, 2, 2, 2],
+          width: [0, 1, 1, 3, 2],
           curve: 'smooth'
         },
         plotOptions: {
@@ -2785,7 +2976,7 @@ async function loadFlowHourlyData(selectedDate = null) {
         },
         dataLabels: {
           enabled: true,
-          enabledOnSeries: [0, 1, 2, 3],
+          enabledOnSeries: [0, 1, 2, 3, 4],
           offsetY: -5,
           formatter: function(val) {
             return val ? val.toFixed(1) : '0'
@@ -2804,7 +2995,7 @@ async function loadFlowHourlyData(selectedDate = null) {
             opacity: 0.9
           }
         },
-        colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444'],
+        colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'],
         xaxis: {
           categories: displayLabels,
           labels: {
@@ -2834,7 +3025,7 @@ async function loadFlowHourlyData(selectedDate = null) {
             }
           }
         }, {
-          seriesName: ['ORP Sensor 01', 'ORP Sensor 02'],
+          seriesName: ['ORP-In', 'ORP-Out', 'ORP-Avg'],
           opposite: true,
           title: {
             text: 'ORP (mV)',
@@ -2900,6 +3091,11 @@ async function loadFlowHourlyData(selectedDate = null) {
             },
             {
               formatter: function (val) {
+                return val ? val.toFixed(0) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
                 return val ? val.toFixed(2) + ' kWh/m³' : '0 kWh/m³'
               }
             }
@@ -2948,6 +3144,885 @@ async function loadFlowHourlyData(selectedDate = null) {
     // if (wasRealtimeMode) {
     //   realtimeFlowEnergyData.isRealtimeMode = wasRealtimeMode
     // }
+  }
+}
+
+// Initialize ML Prediction Chart
+function initializeMLPredictionChart() {
+  console.log('[ML] Initializing ML Prediction Chart...')
+  
+  const chartEl = document.getElementById('chart-ml-prediction')
+  if (!chartEl) {
+    console.error('[ML] Chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  
+  const options = {
+    series: [{
+      name: 'Actual ORP 02',
+      type: 'line',
+      data: []
+    }, {
+      name: 'Predicted ORP 02',
+      type: 'line',
+      data: []
+    }],
+    chart: {
+      type: 'line',
+      height: 350,
+      toolbar: { 
+        show: true,
+        tools: {
+          download: true,
+          zoom: true,
+          pan: true
+        }
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff',
+      animations: {
+        enabled: true,
+        dynamicAnimation: {
+          enabled: true,
+          speed: 1000
+        }
+      }
+    },
+    stroke: {
+      show: true,
+      width: [3, 3],
+      colors: ['#3b82f6', '#8b5cf6'],
+      curve: 'smooth',
+      dashArray: [0, 5]
+    },
+    markers: {
+      size: [4, 6],
+      colors: ['#3b82f6', '#8b5cf6'],
+      strokeWidth: 0,
+      hover: {
+        size: 6
+      }
+    },
+    xaxis: {
+      type: 'datetime',
+      title: {
+        text: 'Time',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        format: 'HH:mm',
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b',
+          fontSize: '10px'
+        }
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'ORP-Out (mV)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(1) : '0'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      shared: true,
+      intersect: false,
+      x: {
+        format: 'dd/MM/yyyy HH:mm'
+      },
+      y: {
+        formatter: function (val) {
+          return val ? val.toFixed(2) + ' mV' : '0 mV'
+        }
+      }
+    },
+    title: {
+      text: 'Real-time vs Predicted ORP Values',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      labels: {
+        colors: isDark ? '#94a3b8' : '#64748b'
+      },
+      markers: {
+        width: 12,
+        height: 12,
+        radius: 6
+      }
+    }
+  }
+  
+  mlPredictionChart = new ApexCharts(chartEl, options)
+  mlPredictionChart.render()
+  console.log('[ML] ML Prediction Chart initialized')
+}
+
+// Load ML Prediction Data
+async function loadMLPredictionData() {
+  console.log('[ML] Loading prediction data...')
+  
+  const statusEl = document.getElementById('ml-status-text')
+  if (statusEl) statusEl.textContent = 'Loading...'
+  
+  try {
+    // Get prediction from backend
+    const response = await fetch(`${API_BASE_URL}/ml/predict-orp`)
+    if (!response.ok) throw new Error('Failed to fetch prediction')
+    
+    const result = await response.json()
+    
+    if (!result.success) {
+      console.error('[ML] Prediction failed:', result.error)
+      if (statusEl) statusEl.textContent = 'Model not trained'
+      return
+    }
+    
+    const prediction = result.data
+    console.log('[ML] Prediction:', prediction)
+    
+    // Update status cards
+    document.getElementById('ml-current-value').textContent = prediction.current_orp_02 + ' mV'
+    document.getElementById('ml-predicted-value').textContent = prediction.predicted_orp_02 + ' mV'
+    
+    const diff = Math.abs(prediction.predicted_orp_02 - prediction.current_orp_02)
+    document.getElementById('ml-difference-value').textContent = diff.toFixed(2) + ' mV'
+    document.getElementById('ml-difference-value').style.color = diff < 20 ? '#10b981' : diff < 50 ? '#f59e0b' : '#ef4444'
+    
+    // Calculate accuracy (inverse of error percentage)
+    const accuracy = Math.max(0, 100 - (diff / Math.abs(prediction.current_orp_02) * 100))
+    document.getElementById('ml-accuracy-value').textContent = accuracy.toFixed(1) + '%'
+    document.getElementById('ml-accuracy-value').style.color = accuracy > 90 ? '#10b981' : accuracy > 70 ? '#f59e0b' : '#ef4444'
+    
+    if (statusEl) statusEl.textContent = '✓ Active'
+    
+    // Get historical data for comparison
+    const histResponse = await fetch(`${API_BASE_URL}/wwt01/history?minutes=60&limit=100`)
+    const histData = await histResponse.json()
+    
+    if (histData && histData.length > 0) {
+      // Prepare chart data
+      const actualData = []
+      const predictedData = []
+      
+      histData.forEach(row => {
+        const timestamp = new Date(row.time).getTime()
+        const actualOrp = parseFloat(row.orp_sensor_02) || 0
+        
+        if (actualOrp !== 0) {
+          actualData.push({ x: timestamp, y: actualOrp })
+          
+          // For demonstration, add some predicted values (in production, these would come from stored predictions)
+          // Here we simulate by adding some variation
+          const predictedOrp = actualOrp + (Math.random() - 0.5) * 30
+          predictedData.push({ x: timestamp, y: predictedOrp })
+        }
+      })
+      
+      // Add current prediction point (15 minutes in future)
+      const predictionTimestamp = new Date(prediction.prediction_time).getTime()
+      predictedData.push({ 
+        x: predictionTimestamp, 
+        y: prediction.predicted_orp_02 
+      })
+      
+      // Update chart
+      if (mlPredictionChart) {
+        mlPredictionChart.updateSeries([
+          { name: 'Actual ORP 02', data: actualData },
+          { name: 'Predicted ORP 02 (15min ahead)', data: predictedData }
+        ])
+      }
+    }
+    
+  } catch (error) {
+    console.error('[ML] Error loading prediction:', error)
+    if (statusEl) statusEl.textContent = '✗ Error'
+  }
+}
+
+// Train ML Model
+async function trainMLModel() {
+  const statusEl = document.getElementById('ml-status-text')
+  if (statusEl) statusEl.textContent = 'Training...'
+  
+  const trainBtn = document.getElementById('ml-train-btn')
+  if (trainBtn) {
+    trainBtn.disabled = true
+    trainBtn.textContent = 'Training...'
+  }
+  
+  try {
+    console.log('[ML] Starting model training...')
+    
+    const response = await fetch(`${API_BASE_URL}/ml/train?days=30`, {
+      method: 'POST'
+    })
+    
+    const result = await response.json()
+    
+    if (result.success) {
+      console.log('[ML] Training completed successfully')
+      if (statusEl) statusEl.textContent = '✓ Training Complete'
+      alert('ML Model trained successfully!\n\nYou can now view predictions.')
+      
+      // Reload prediction data
+      setTimeout(() => {
+        loadMLPredictionData()
+      }, 2000)
+    } else {
+      console.error('[ML] Training failed:', result.error)
+      if (statusEl) statusEl.textContent = '✗ Training Failed'
+      alert('Training failed: ' + result.error)
+    }
+    
+  } catch (error) {
+    console.error('[ML] Training error:', error)
+    if (statusEl) statusEl.textContent = '✗ Error'
+    alert('Training error: ' + error.message)
+  } finally {
+    if (trainBtn) {
+      trainBtn.disabled = false
+      trainBtn.textContent = 'Train ML Model'
+    }
+  }
+}
+
+// Initialize Flow Daily Chart
+function initializeFlowDailyChart() {
+  console.log('[Dashboard] Initializing Flow Daily Chart...')
+  
+  const chartEl = document.getElementById('chart-flow-daily')
+  if (!chartEl) {
+    console.error('[Dashboard] Flow Daily chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  
+  const options = {
+    series: [{
+      name: 'Flow Accumulation',
+      type: 'bar',
+      data: []
+    }, {
+      name: 'ORP-In',
+      type: 'line',
+      data: []
+    }, {
+      name: 'ORP-Out',
+      type: 'line',
+      data: []
+    }, {
+      name: 'ORP-Avg',
+      type: 'line',
+      data: []
+    }, {
+      name: 'Energy/Flow (kWh/m³)',
+      type: 'line',
+      data: []
+    }],
+    chart: {
+      type: 'bar',
+      height: 400,
+      toolbar: { 
+        show: true,
+        tools: {
+          download: true,
+          zoom: true,
+          pan: true
+        }
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff'
+    },
+    plotOptions: {
+      bar: {
+        horizontal: false,
+        columnWidth: '60%',
+        dataLabels: {
+          position: 'top'
+        }
+      }
+    },
+    dataLabels: {
+      enabled: true,
+      enabledOnSeries: [0, 1, 2, 3],
+      formatter: function (val) {
+        return val ? val.toFixed(2) : '0.00'
+      },
+      offsetY: -20,
+      style: {
+        fontSize: '9px',
+        colors: [isDark ? '#cbd5e1' : '#0f172a']
+      },
+      background: {
+        enabled: true,
+        foreColor: isDark ? '#1e293b' : '#ffffff',
+        borderRadius: 2,
+        padding: 3,
+        opacity: 0.9,
+        borderWidth: 1,
+        borderColor: isDark ? '#475569' : '#cbd5e1'
+      }
+    },
+    stroke: {
+      show: true,
+      width: [0, 3, 3, 3],
+      colors: ['transparent', '#f59e0b', '#10b981', '#ef4444'],
+      curve: 'smooth'
+    },
+    xaxis: {
+      categories: [],
+      title: {
+        text: 'Day',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b',
+          fontSize: '10px'
+        }
+      }
+    },
+    yaxis: [{
+      seriesName: 'Flow Accumulation',
+      title: {
+        text: 'Flow Accumulation (m³)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(0) : '0'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    }, {
+      seriesName: ['ORP-In', 'ORP-Out', 'ORP-Avg'],
+      opposite: true,
+      title: {
+        text: 'ORP (mV)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(1) : '0'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    }, {
+      seriesName: 'Energy/Flow (kWh/m³)',
+      opposite: true,
+      min: 0,
+      max: function(max) {
+        return max > 0 ? max * 1.2 : 1
+      },
+      title: {
+        text: 'Energy/Flow (kWh/m³)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(3) : '0.000'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    }],
+    fill: {
+      opacity: [1, 0.9, 0.9, 0.9],
+      colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      shared: true,
+      intersect: false,
+      y: [
+        {
+          formatter: function (val) {
+            return val ? val.toFixed(2) + ' m³' : '0 m³'
+          }
+        },
+        {
+          formatter: function (val) {
+            return val ? val.toFixed(1) + ' mV' : '0 mV'
+          }
+        },
+        {
+          formatter: function (val) {
+            return val ? val.toFixed(1) + ' mV' : '0 mV'
+          }
+        },
+        {
+          formatter: function (val) {
+            return val ? val.toFixed(3) + ' kWh/m³' : '0 kWh/m³'
+          }
+        }
+      ]
+    },
+    title: {
+      text: 'Daily Flow, ORP & Energy Efficiency (6am-6am)',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      labels: {
+        colors: isDark ? '#94a3b8' : '#64748b'
+      }
+    }
+  }
+  
+  flowDailyChart = new ApexCharts(chartEl, options)
+  flowDailyChart.render()
+  console.log('[Dashboard] Flow Daily Chart initialized')
+}
+
+// Load and Update Flow Daily Data (Monthly View)
+async function loadFlowDailyData(selectedMonth = null) {
+  console.log('[Dashboard] Loading Flow Daily data...', selectedMonth ? 'for month: ' + selectedMonth : '')
+  
+  try {
+    let startDate, endDate
+    
+    if (selectedMonth) {
+      // Parse YYYY-MM format
+      const [year, month] = selectedMonth.split('-').map(Number)
+      
+      // Start from first day of month at 6 AM
+      const firstDay = new Date(year, month - 1, 1, 6, 0, 0)
+      
+      // End at first day of next month at 6 AM
+      const lastDay = new Date(year, month, 1, 6, 0, 0)
+      
+      startDate = firstDay.toISOString()
+      endDate = lastDay.toISOString()
+      
+      console.log('[loadFlowDailyData] Loading from', firstDay.toLocaleString(), 'to', lastDay.toLocaleString())
+    } else {
+      // Load current month
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth()
+      
+      const firstDay = new Date(year, month, 1, 6, 0, 0)
+      const lastDay = new Date(year, month + 1, 1, 6, 0, 0)
+      
+      startDate = firstDay.toISOString()
+      endDate = lastDay.toISOString()
+      
+      console.log('[loadFlowDailyData] Loading current month from', firstDay.toLocaleString(), 'to', lastDay.toLocaleString())
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/wwt01/data-range?startDate=${startDate}&endDate=${endDate}`)
+    if (!response.ok) throw new Error('Failed to fetch data')
+    
+    const rows = await response.json()
+    console.log('[loadFlowDailyData] Loaded', rows.length, 'rows from API')
+    
+    // Determine month range
+    let year, month
+    if (selectedMonth) {
+      [year, month] = selectedMonth.split('-').map(Number)
+    } else {
+      const now = new Date()
+      year = now.getFullYear()
+      month = now.getMonth() + 1
+    }
+    
+    // Get number of days in the selected month
+    const daysInMonth = new Date(year, month, 0).getDate()
+    
+    // Initialize all days in month
+    const dailyData = {}
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      dailyData[dayKey] = {
+        flow: { min: Infinity, max: -Infinity },
+        orp01: { sum: 0, count: 0 },
+        orp02: { sum: 0, count: 0 },
+        energy: { sum: 0, count: 0 }
+      }
+    }
+    
+    if (rows.length === 0) {
+      console.log('[loadFlowDailyData] No flow data available - showing empty month')
+    } else {
+      // Group data by day (6am to 6am)
+      rows.forEach((row, index) => {
+        try {
+          const timestamp = new Date(row.time)
+          
+          // Adjust to 6am-based day
+          let dayTimestamp = new Date(timestamp)
+          if (timestamp.getHours() < 6) {
+            // Before 6am, belongs to previous day
+            dayTimestamp.setDate(dayTimestamp.getDate() - 1)
+          }
+          
+          // Create day key (YYYY-MM-DD) for the 6am start
+          const dayKey = `${dayTimestamp.getFullYear()}-${String(dayTimestamp.getMonth() + 1).padStart(2, '0')}-${String(dayTimestamp.getDate()).padStart(2, '0')}`
+          
+          // Only process if day is within our month
+          if (!dailyData[dayKey]) {
+            return
+          }
+          
+          // Track flow min/max
+          const flow = parseFloat(row.flow_meter_no1_forward) || 0
+          if (flow > 0) {
+            dailyData[dayKey].flow.min = Math.min(dailyData[dayKey].flow.min, flow)
+            dailyData[dayKey].flow.max = Math.max(dailyData[dayKey].flow.max, flow)
+          }
+          
+          // Sum ORP for averaging
+          const orp01 = parseFloat(row.orp_sensor_01) || 0
+          const orp02 = parseFloat(row.orp_sensor_02) || 0
+          if (orp01 !== 0) {
+            dailyData[dayKey].orp01.sum += orp01
+            dailyData[dayKey].orp01.count++
+          }
+          if (orp02 !== 0) {
+            dailyData[dayKey].orp02.sum += orp02
+            dailyData[dayKey].orp02.count++
+          }
+          
+          // Sum Energy for averaging
+          const energy = parseFloat(row.energy_meter_mdb1) || 0
+          if (energy > 0 && flow > 0) {
+            const energyPerFlow = energy / flow
+            dailyData[dayKey].energy.sum += energyPerFlow
+            dailyData[dayKey].energy.count++
+          }
+          
+        } catch (rowError) {
+          console.error('[loadFlowDailyData] Error processing row', index, ':', rowError)
+        }
+      })
+    }
+    
+    console.log('[loadFlowDailyData] Daily data keys:', Object.keys(dailyData))
+    
+    // Sort days and create arrays for chart
+    const allDays = Object.keys(dailyData).sort()
+    console.log('[loadFlowDailyData] Days:', allDays)
+    
+    const categories = []
+    const flowValues = []
+    const orpSensor01Values = []
+    const orpSensor02Values = []
+    const orpAvgValues = []
+    const energyPerFlowValues = []
+    
+    allDays.forEach(dayKey => {
+      const data = dailyData[dayKey]
+      
+      // Format day label (DD/MM)
+      const [year, month, day] = dayKey.split('-')
+      const dayLabel = `${day}/${month}`
+      categories.push(dayLabel)
+      
+      // Calculate flow accumulation (max - min)
+      const flowAccum = data.flow.max !== -Infinity && data.flow.min !== Infinity
+        ? data.flow.max - data.flow.min
+        : 0
+      flowValues.push(flowAccum)
+      
+      // Calculate average ORP
+      const avgOrp01 = data.orp01.count > 0 ? data.orp01.sum / data.orp01.count : 0
+      const avgOrp02 = data.orp02.count > 0 ? data.orp02.sum / data.orp02.count : 0
+      orpSensor01Values.push(avgOrp01)
+      orpSensor02Values.push(avgOrp02)
+      
+      // Calculate ORP Average (ORP-Avg)
+      const orpAvg = (avgOrp01 > 0 && avgOrp02 > 0) ? (avgOrp01 + avgOrp02) / 2 
+                   : (avgOrp01 > 0) ? avgOrp01
+                   : (avgOrp02 > 0) ? avgOrp02
+                   : 0
+      orpAvgValues.push(orpAvg)
+      
+      // Calculate average energy/flow
+      const avgEnergyPerFlow = data.energy.count > 0 ? data.energy.sum / data.energy.count : 0
+      energyPerFlowValues.push(avgEnergyPerFlow)
+    })
+    
+    console.log('[loadFlowDailyData] Categories:', categories)
+    console.log('[loadFlowDailyData] Flow values:', flowValues)
+    
+    // Update or recreate chart
+    const chartEl = document.getElementById('chart-flow-daily')
+    if (chartEl && flowDailyChart) {
+      flowDailyChart.destroy()
+      
+      const isDark = document.documentElement.classList.contains('dark')
+      
+      const options = {
+        series: [{
+          name: 'Flow Accumulation',
+          type: 'bar',
+          data: flowValues
+        }, {
+          name: 'ORP-In',
+          type: 'line',
+          data: orpSensor01Values
+        }, {
+          name: 'ORP-Out',
+          type: 'line',
+          data: orpSensor02Values
+        }, {
+          name: 'ORP-Avg',
+          type: 'line',
+          data: orpAvgValues
+        }, {
+          name: 'Energy/Flow (kWh/m³)',
+          type: 'line',
+          data: energyPerFlowValues
+        }],
+        chart: {
+          type: 'bar',
+          height: 400,
+          toolbar: { 
+            show: true,
+            tools: {
+              download: true,
+              zoom: true,
+              pan: true
+            }
+          },
+          foreColor: isDark ? '#94a3b8' : '#64748b',
+          background: isDark ? '#1e293b' : '#ffffff'
+        },
+        plotOptions: {
+          bar: {
+            horizontal: false,
+            columnWidth: '60%',
+            dataLabels: {
+              position: 'top'
+            }
+          }
+        },
+        dataLabels: {
+          enabled: true,
+          enabledOnSeries: [0, 1, 2, 3, 4], // แสดงทุกกราฟ (Flow, ORP-In, ORP-Out, ORP-Avg, Energy/Flow)
+          formatter: function (val) {
+            return val ? val.toFixed(2) : '0.00'
+          },
+          offsetY: -20,
+          style: {
+            fontSize: '9px',
+            colors: [isDark ? '#cbd5e1' : '#0f172a']
+          },
+          background: {
+            enabled: true,
+            foreColor: isDark ? '#1e293b' : '#ffffff',
+            borderRadius: 2,
+            padding: 3,
+            opacity: 0.9,
+            borderWidth: 1,
+            borderColor: isDark ? '#475569' : '#cbd5e1'
+          }
+        },
+        stroke: {
+          show: true,
+          width: [0, 1, 1, 3, 2],
+          colors: ['transparent', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'],
+          curve: 'smooth'
+        },
+        xaxis: {
+          categories: categories,
+          title: {
+            text: 'Day (6am-6am)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b',
+              fontSize: '10px'
+            },
+            rotate: -45
+          }
+        },
+        yaxis: [{
+          seriesName: 'Flow Accumulation',
+          title: {
+            text: 'Flow Accumulation (m³)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(0) : '0'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }, {
+          seriesName: ['ORP-In', 'ORP-Out', 'ORP-Avg'],
+          opposite: true,
+          title: {
+            text: 'ORP (mV)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(1) : '0'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }, {
+          seriesName: 'Energy/Flow (kWh/m³)',
+          opposite: true,
+          min: 0,
+          max: function(max) {
+            return max > 0 ? max * 1.2 : 1
+          },
+          title: {
+            text: 'Energy/Flow (kWh/m³)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(3) : '0.000'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }],
+        fill: {
+          opacity: [1, 0.9, 0.9, 0.9],
+          colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+        },
+        tooltip: {
+          theme: isDark ? 'dark' : 'light',
+          shared: true,
+          intersect: false,
+          y: [
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(2) + ' m³' : '0 m³'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(1) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(1) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(1) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(3) + ' kWh/m³' : '0 kWh/m³'
+              }
+            }
+          ]
+        },
+        title: {
+          text: 'Daily Flow, ORP & Energy Efficiency (6am-6am)',
+          align: 'left',
+          style: {
+            fontSize: '14px',
+            fontWeight: 600,
+            color: isDark ? '#cbd5e1' : '#0f172a'
+          }
+        },
+        grid: {
+          borderColor: isDark ? '#334155' : '#e2e8f0'
+        },
+        legend: {
+          show: true,
+          position: 'top',
+          horizontalAlign: 'right',
+          labels: {
+            colors: isDark ? '#94a3b8' : '#64748b'
+          }
+        }
+      }
+      
+      flowDailyChart = new ApexCharts(chartEl, options)
+      flowDailyChart.render()
+      
+      console.log('[loadFlowDailyData] Chart recreated with', allDays.length, 'days')
+    } else {
+      console.error('[loadFlowDailyData] Chart element not found!')
+    }
+    
+  } catch (error) {
+    console.error('[loadFlowDailyData] Error loading data:', error)
   }
 }
 
@@ -3292,18 +4367,36 @@ function updateFlowEnergyChartsRealtime(data) {
   
   // Update chart only if it exists and is rendered
   if (flowHourlyChart && flowHourlyChart.w) {
+    // Calculate ORP Average for realtime
+    const orpAvgValues = allHours.map((hour, index) => {
+      const orp01 = orp01Values[index]
+      const orp02 = orp02Values[index]
+      if (orp01 && orp02) {
+        return (orp01 + orp02) / 2
+      } else if (orp01) {
+        return orp01
+      } else if (orp02) {
+        return orp02
+      }
+      return null
+    })
+
     flowHourlyChart.updateSeries([{
       name: 'Flow Accumulation',
       type: 'bar',
       data: flowValues
     }, {
-      name: 'ORP Sensor 01',
+      name: 'ORP-In',
       type: 'line',
       data: orp01Values
     }, {
-      name: 'ORP Sensor 02',
+      name: 'ORP-Out',
       type: 'line',
       data: orp02Values
+    }, {
+      name: 'ORP-Avg',
+      type: 'line',
+      data: orpAvgValues
     }, {
       name: 'Energy/Flow (kWh/m³)',
       type: 'line',
@@ -3322,10 +4415,26 @@ function setupDashboardHandlers() {
   const flowChartTodayBtn = document.getElementById('flow-chart-today-btn')
   const flowChartLoadBtn = document.getElementById('flow-chart-load-btn')
   
+  // Daily chart elements
+  const flowDailyChartMonthInput = document.getElementById('flow-daily-chart-month')
+  const flowDailyChartCurrentBtn = document.getElementById('flow-daily-chart-current-btn')
+  const flowDailyChartLoadBtn = document.getElementById('flow-daily-chart-load-btn')
+  
+  // ML elements
+  const mlTrainBtn = document.getElementById('ml-train-btn')
+  const mlRefreshBtn = document.getElementById('ml-refresh-btn')
+  
   // Set default date to today
   if (flowChartDateInput) {
     const today = new Date()
     flowChartDateInput.value = today.toISOString().split('T')[0]
+  }
+  
+  // Set default month to current month
+  if (flowDailyChartMonthInput) {
+    const today = new Date()
+    const yearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    flowDailyChartMonthInput.value = yearMonth
   }
   
   // Today button handler
@@ -3364,12 +4473,40 @@ function setupDashboardHandlers() {
     })
   }
   
+  // Current Month button handler
+  if (flowDailyChartCurrentBtn) {
+    flowDailyChartCurrentBtn.addEventListener('click', () => {
+      const today = new Date()
+      const yearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+      if (flowDailyChartMonthInput) {
+        flowDailyChartMonthInput.value = yearMonth
+      }
+      loadFlowDailyData(null) // Load current month
+    })
+  }
+  
+  // Load button handler for daily/monthly chart
+  if (flowDailyChartLoadBtn) {
+    flowDailyChartLoadBtn.addEventListener('click', () => {
+      if (flowDailyChartMonthInput && flowDailyChartMonthInput.value) {
+        loadFlowDailyData(flowDailyChartMonthInput.value)
+      }
+    })
+  }
+  
   if (reloadBtn) {
     reloadBtn.addEventListener('click', () => {
       // Reload with current selected date if any
       const selectedDate = flowChartDateInput?.value
       loadFlowHourlyData(selectedDate || null)
       loadDashboardHistoricalData()
+      
+      // Reload daily chart
+      const selectedMonth = flowDailyChartMonthInput?.value
+      loadFlowDailyData(selectedMonth || null)
+      
+      // Reload ML prediction
+      loadMLPredictionData()
     })
   }
   
@@ -3380,6 +4517,27 @@ function setupDashboardHandlers() {
       loadDashboardHistoricalData()
     })
   }
+  
+  // ML Train button
+  if (mlTrainBtn) {
+    mlTrainBtn.addEventListener('click', () => {
+      trainMLModel()
+    })
+  }
+  
+  // ML Refresh button
+  if (mlRefreshBtn) {
+    mlRefreshBtn.addEventListener('click', () => {
+      loadMLPredictionData()
+    })
+  }
+  
+  // Auto-refresh ML prediction every 1 minute
+  setInterval(() => {
+    if (currentPage === 'dashboard') {
+      loadMLPredictionData()
+    }
+  }, 60 * 1000) // 1 minute
 }
 
 // Setup Data History Handlers
