@@ -2554,6 +2554,10 @@ function initializeFlowHourlyChart() {
 async function loadFlowHourlyData(selectedDate = null) {
   console.log('[Dashboard] Loading Flow Hourly data...', selectedDate ? 'for date: ' + selectedDate : '')
   
+  // Disable realtime updates while loading from API
+  const wasRealtimeMode = realtimeFlowEnergyData.isRealtimeMode
+  realtimeFlowEnergyData.isRealtimeMode = false
+  
   try {
     let apiUrl
     let startTime, endTime
@@ -2719,8 +2723,18 @@ async function loadFlowHourlyData(selectedDate = null) {
       console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
     }
     
+    // Re-enable realtime mode only if viewing today
+    const today = new Date().toISOString().split('T')[0]
+    if (!selectedDate || selectedDate === today) {
+      realtimeFlowEnergyData.isRealtimeMode = true
+    }
+    
   } catch (error) {
     console.error('[Dashboard] Error loading flow hourly data:', error)
+    // Restore realtime mode on error if it was enabled
+    if (wasRealtimeMode) {
+      realtimeFlowEnergyData.isRealtimeMode = wasRealtimeMode
+    }
   }
 }
 
