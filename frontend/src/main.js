@@ -2604,6 +2604,7 @@ async function loadFlowHourlyData(selectedDate = null) {
     const hourlyData = {}
     const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
     
+    console.log('[loadFlowHourlyData] Processing rows...')
     rows.forEach(row => {
       const date = new Date(row.time)
       const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
@@ -2645,6 +2646,9 @@ async function loadFlowHourlyData(selectedDate = null) {
         hourlyData[hourKey].energyMin = Math.min(hourlyData[hourKey].energyMin, row.power_mdb_01_energy)
       }
     })
+    
+    console.log('[loadFlowHourlyData] Hourly data keys:', Object.keys(hourlyData))
+    console.log('[loadFlowHourlyData] Hourly data sample:', hourlyData['23:00'], hourlyData['06:00'], hourlyData['07:00'])
     
     // Prepare chart data - Start from 6 AM
     const allHours = []
