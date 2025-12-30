@@ -2600,27 +2600,33 @@ async function loadFlowHourlyData(selectedDate = null) {
       return
     }
     
-    // Group data by hour and calculate max - min for flow, average for ORP
-    const hourlyData = {}
-    const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
-    
-    console.log('[loadFlowHourlyData] Processing rows...')
-    rows.forEach(row => {
-      const date = new Date(row.time)
-      const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
+    try {
+      // Group data by hour and calculate max - min for flow, average for ORP
+      const hourlyData = {}
+      const datePrefix = selectedDate ? new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' ' : ''
       
-      if (!hourlyData[hourKey]) {
-        hourlyData[hourKey] = {
-          max: row.flow_meter_no1_forward || 0,
-          min: row.flow_meter_no1_forward || 0,
-          orpSensor01Sum: 0,
-          orpSensor01Count: 0,
-          orpSensor02Sum: 0,
-          orpSensor02Count: 0,
-          energyMax: row.power_mdb_01_energy || 0,
-          energyMin: row.power_mdb_01_energy || 0
-        }
-      }
+      console.log('[loadFlowHourlyData] Processing rows...')
+      rows.forEach((row, index) => {
+        try {
+          const date = new Date(row.time)
+          const hourKey = `${date.getHours().toString().padStart(2, '0')}:00`
+          
+          if (index < 3) {
+            console.log(`[loadFlowHourlyData] Row ${index}: time=${row.time}, date=${date}, hourKey=${hourKey}`)
+          }
+          
+          if (!hourlyData[hourKey]) {
+            hourlyData[hourKey] = {
+              max: row.flow_meter_no1_forward || 0,
+              min: row.flow_meter_no1_forward || 0,
+              orpSensor01Sum: 0,
+              orpSensor01Count: 0,
+              orpSensor02Sum: 0,
+              orpSensor02Count: 0,
+              energyMax: row.power_mdb_01_energy || 0,
+              energyMin: row.power_mdb_01_energy || 0
+            }
+          }
       
       // Flow data
       if (row.flow_meter_no1_forward !== null && row.flow_meter_no1_forward !== undefined) {
@@ -2645,6 +2651,9 @@ async function loadFlowHourlyData(selectedDate = null) {
         hourlyData[hourKey].energyMax = Math.max(hourlyData[hourKey].energyMax, row.power_mdb_01_energy)
         hourlyData[hourKey].energyMin = Math.min(hourlyData[hourKey].energyMin, row.power_mdb_01_energy)
       }
+        } catch (rowError) {
+          console.error('[loadFlowHourlyData] Error processing row:', rowError, row)
+        }
     })
     
     console.log('[loadFlowHourlyData] Hourly data keys:', Object.keys(hourlyData))
@@ -2662,7 +2671,9 @@ async function loadFlowHourlyData(selectedDate = null) {
       // Add date prefix to first hour (06:00) or when crossing midnight
       if (i === 0 || hour === 0) {
         displayLabels.push(datePrefix + hourKey)
-      } else {
+     
+    
+    console.log('[loadFlowHourlyData] All hours array:', allHours) } else {
         displayLabels.push(hourKey)
       }
     }
@@ -2904,7 +2915,11 @@ async function loadFlowHourlyData(selectedDate = null) {
       flowHourlyChart = new ApexCharts(chartEl, options)
       flowHourlyChart.render()
       
-      const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
+     
+    } catch (chartError) {
+      console.error('[loadFlowHourlyData] Error creating chart:', chartError)
+      throw chartError
+    } const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
       console.log('[Dashboard] Flow Hourly chart recreated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
     }
     
