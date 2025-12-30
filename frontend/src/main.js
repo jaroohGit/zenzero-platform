@@ -2701,13 +2701,16 @@ async function loadFlowHourlyData(selectedDate = null) {
       return null  // No data or zero flow
     })
     
-    // Update chart
-    if (flowHourlyChart && flowHourlyChart.w) {
-      // Use updateOptions to update both categories and series together
-      flowHourlyChart.updateOptions({
-        xaxis: {
-          categories: displayLabels
-        },
+    // Update chart - destroy and recreate to ensure proper rendering
+    if (flowHourlyChart) {
+      flowHourlyChart.destroy()
+    }
+    
+    const chartEl = document.querySelector('#flowHourlyChart')
+    if (chartEl) {
+      const isDark = document.documentElement.classList.contains('dark')
+      
+      const options = {
         series: [{
           name: 'Flow Accumulation',
           type: 'bar',
@@ -2724,11 +2727,172 @@ async function loadFlowHourlyData(selectedDate = null) {
           name: 'Energy/Flow (kWh/m³)',
           type: 'line',
           data: energyPerFlowValues
-        }]
-      }, false, true, true)
+        }],
+        chart: {
+          height: 350,
+          type: 'line',
+          toolbar: { show: true },
+          background: 'transparent',
+          animations: { enabled: false }
+        },
+        stroke: {
+          width: [0, 2, 2, 2],
+          curve: 'smooth'
+        },
+        plotOptions: {
+          bar: {
+            columnWidth: '50%',
+            dataLabels: {
+              position: 'top'
+            }
+          }
+        },
+        dataLabels: {
+          enabled: true,
+          enabledOnSeries: [0, 1, 2, 3],
+          offsetY: -5,
+          style: {
+            fontSize: '10px',
+            colors: [isDark ? '#cbd5e1' : '#0f172a']
+          },
+          background: {
+            enabled: true,
+            foreColor: isDark ? '#1e293b' : '#ffffff',
+            padding: 4,
+            borderRadius: 2,
+            borderWidth: 1,
+            borderColor: isDark ? '#475569' : '#e2e8f0',
+            opacity: 0.9
+          }
+        },
+        colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444'],
+        xaxis: {
+          categories: displayLabels,
+          labels: {
+            rotate: -45,
+            rotateAlways: true,
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b',
+              fontSize: '10px'
+            }
+          }
+        },
+        yaxis: [{
+          seriesName: 'Flow Accumulation',
+          title: {
+            text: 'Flow Accumulation (m³)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(2) : '0'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }, {
+          seriesName: ['ORP Sensor 01', 'ORP Sensor 02'],
+          opposite: true,
+          title: {
+            text: 'ORP (mV)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(1) : '0'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }, {
+          seriesName: 'Energy/Flow (kWh/m³)',
+          opposite: true,
+          min: 0,
+          max: function(max) {
+            return max > 0 ? max * 1.2 : 1
+          },
+          title: {
+            text: 'Energy/Flow (kWh/m³)',
+            style: {
+              color: isDark ? '#cbd5e1' : '#0f172a',
+              fontSize: '12px'
+            }
+          },
+          labels: {
+            formatter: function(val) {
+              return val ? val.toFixed(3) : '0.000'
+            },
+            style: {
+              colors: isDark ? '#94a3b8' : '#64748b'
+            }
+          }
+        }],
+        fill: {
+          opacity: [1, 0.9, 0.9, 0.9],
+          colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+        },
+        tooltip: {
+          theme: isDark ? 'dark' : 'light',
+          shared: true,
+          intersect: false,
+          y: [
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(2) + ' m³' : '0 m³'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(1) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(1) + ' mV' : '0 mV'
+              }
+            },
+            {
+              formatter: function (val) {
+                return val ? val.toFixed(3) + ' kWh/m³' : '0 kWh/m³'
+              }
+            }
+          ]
+        },
+        title: {
+          text: 'Hourly Flow, ORP & Energy Efficiency',
+          align: 'left',
+          style: {
+            fontSize: '14px',
+            fontWeight: 600,
+            color: isDark ? '#cbd5e1' : '#0f172a'
+          }
+        },
+        grid: {
+          borderColor: isDark ? '#334155' : '#e2e8f0'
+        },
+        legend: {
+          show: true,
+          position: 'top',
+          horizontalAlign: 'right',
+          labels: {
+            colors: isDark ? '#94a3b8' : '#64748b'
+          }
+        }
+      }
+      
+      flowHourlyChart = new ApexCharts(chartEl, options)
+      flowHourlyChart.render()
       
       const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
-      console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
+      console.log('[Dashboard] Flow Hourly chart recreated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
     }
     
     // Re-enable realtime mode only if viewing today
