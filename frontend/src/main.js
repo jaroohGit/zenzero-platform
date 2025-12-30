@@ -3057,32 +3057,28 @@ function updateFlowEnergyChartsRealtime(data) {
   })
   const energyPerFlowValues = allHours.map(hour => realtimeFlowEnergyData.hourlyAccumulation[hour]?.energyPerFlow || null)
   
-  // Update chart
-  flowHourlyChart.updateOptions({
-    xaxis: {
-      categories: allHours
-    }
-  })
-  
-  flowHourlyChart.updateSeries([{
-    name: 'Flow Accumulation',
-    type: 'bar',
-    data: flowValues
-  }, {
-    name: 'ORP Sensor 01',
-    type: 'line',
-    data: orp01Values
-  }, {
-    name: 'ORP Sensor 02',
-    type: 'line',
-    data: orp02Values
-  }, {
-    name: 'Energy/Flow (kWh/m³)',
-    type: 'line',
-    data: energyPerFlowValues
-  }])
-  
-  console.log('[Dashboard] Flow/Energy charts updated with realtime data for hour:', currentHour)
+  // Update chart only if it exists and is rendered
+  if (flowHourlyChart && flowHourlyChart.w) {
+    flowHourlyChart.updateSeries([{
+      name: 'Flow Accumulation',
+      type: 'bar',
+      data: flowValues
+    }, {
+      name: 'ORP Sensor 01',
+      type: 'line',
+      data: orp01Values
+    }, {
+      name: 'ORP Sensor 02',
+      type: 'line',
+      data: orp02Values
+    }, {
+      name: 'Energy/Flow (kWh/m³)',
+      type: 'line',
+      data: energyPerFlowValues
+    }], false, true)
+    
+    console.log('[Dashboard] Flow/Energy charts updated with realtime data for hour:', currentHour)
+  }
 }
 
 // Setup Dashboard Handlers
