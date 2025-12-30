@@ -2785,7 +2785,7 @@ async function loadFlowHourlyData(selectedDate = null) {
         },
         dataLabels: {
           enabled: true,
-          enabledOnSeries: [0],
+          enabledOnSeries: [0, 1, 2, 3],
           offsetY: -5,
           formatter: function(val) {
             return val ? val.toFixed(1) : '0'
