@@ -2742,7 +2742,7 @@ async function loadFlowHourlyData(selectedDate = null) {
       flowHourlyChart.destroy()
     }
     
-    const chartEl = document.querySelector('#flowHourlyChart')
+    const chartEl = document.getElementById('chart-flow-hourly')
     if (chartEl) {
       const isDark = document.documentElement.classList.contains('dark')
       
@@ -2930,7 +2930,7 @@ async function loadFlowHourlyData(selectedDate = null) {
       const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
       console.log('[Dashboard] Flow Hourly chart recreated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
     } else {
-      console.error('[loadFlowHourlyData] Chart element #flowHourlyChart not found!')
+      console.error('[loadFlowHourlyData] Chart element #chart-flow-hourly not found!')
     }
     
     // Re-enable realtime mode only if viewing today
