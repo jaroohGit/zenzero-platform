@@ -398,7 +398,12 @@ const getWebSocketURL = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host // includes hostname and port if any
   
-  // Use same host with /mqtt path (Caddy will reverse proxy to 8084)
+  // Development mode - connect directly to backend port
+  if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':5173')) {
+    return 'ws://localhost:8084'
+  }
+  
+  // Production mode - Use same host with /mqtt path (Caddy will reverse proxy to 8084)
   return `${protocol}//${host}/mqtt`
 }
 
@@ -409,6 +414,21 @@ let latestData = {
   'zenzero/wwt01': {},
   'zenzero/wwt02': {}
 }
+
+// Get API Base URL based on environment
+const getAPIBaseURL = () => {
+  const host = window.location.host
+  
+  // Development mode - connect directly to backend port
+  if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':5173')) {
+    return 'http://localhost:3001/api'
+  }
+  
+  // Production mode - use relative path (Caddy will reverse proxy)
+  return '/api'
+}
+
+const API_BASE_URL = getAPIBaseURL()
 
 // Connect to MQTT Broker
 function connectMQTT() {
@@ -1451,7 +1471,7 @@ async function initializePHChart() {
   
   // Load historical data from database
   try {
-    const apiUrl = `/api/ph-sensor-02/history?minutes=5`
+    const apiUrl = `${API_BASE_URL}/ph-sensor-02/history?minutes=5`
     const response = await fetch(apiUrl)
     const historicalData = await response.json()
     
@@ -2005,7 +2025,7 @@ async function loadHistoricalData() {
   
   try {
     let data = []
-    let apiUrl = `/api/`
+    let apiUrl = `${API_BASE_URL}/`
     
     if (dataType === 'ph-sensor-02') {
       apiUrl += `ph-sensor-02/history?minutes=${timeRange}`
@@ -2505,7 +2525,7 @@ async function loadFlowHourlyData() {
   
   try {
     // Load data for last 24 hours
-    const apiUrl = `/api/wwt01/history?minutes=1440&limit=5000`
+    const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=1440&limit=5000`
     const response = await fetch(apiUrl)
     const data = await response.json()
     
@@ -2644,7 +2664,7 @@ async function loadDashboardHistoricalData() {
   if (statusEl) statusEl.textContent = 'Loading historical data...'
   
   try {
-    const apiUrl = `/api/wwt01/history?minutes=${timeRange}&limit=1000`
+    const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${timeRange}&limit=1000`
     console.log('[Dashboard] Fetching from:', apiUrl)
     const response = await fetch(apiUrl)
     const data = await response.json()
@@ -2923,7 +2943,7 @@ async function loadWWT01Data() {
   const timeRange = document.getElementById('time-range').value
   const limit = document.getElementById('data-limit').value
   const tbody = document.getElementById('table-body')
-  const apiUrl = `/api/wwt01/history?minutes=${timeRange}&limit=${limit}`
+  const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${timeRange}&limit=${limit}`
   
   tbody.innerHTML = '<tr><td colspan="34" style="text-align: center; padding: 20px;">Loading data...</td></tr>'
   
@@ -3215,7 +3235,7 @@ async function loadORPHistoricalData() {
   console.log('[ORP Analysis] Loading data for', lohand, 'last', timeRange, 'minutes')
   
   try {
-    const apiUrl = `/api/wwt01/history?minutes=${timeRange}&limit=1000`
+    const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${timeRange}&limit=1000`
     const response = await fetch(apiUrl)
     const data = await response.json()
     
@@ -3483,7 +3503,7 @@ async function loadPlantPerformanceData() {
   try {
     // Calculate minutes for the date range
     const minutes = Math.floor((endDate - startDate) / 60000)
-    const apiUrl = `/api/wwt01/history?minutes=${minutes}&limit=10000`
+    const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${minutes}&limit=10000`
     console.log('[Plant Performance] Fetching from:', apiUrl)
     
     const response = await fetch(apiUrl)
