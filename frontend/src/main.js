@@ -2692,12 +2692,11 @@ async function loadFlowHourlyData(selectedDate = null) {
     })
     
     // Update chart
-    if (flowHourlyChart) {
-      flowHourlyChart.updateOptions({
-        xaxis: {
-          categories: displayLabels
-        }
-      })
+    if (flowHourlyChart && flowHourlyChart.w) {
+      // Update categories without triggering re-render
+      flowHourlyChart.w.config.xaxis.categories = displayLabels
+      
+      // Update series data
       flowHourlyChart.updateSeries([{
         name: 'Flow Accumulation',
         type: 'bar',
@@ -2714,7 +2713,7 @@ async function loadFlowHourlyData(selectedDate = null) {
         name: 'Energy/Flow (kWh/m³)',
         type: 'line',
         data: energyPerFlowValues
-      }])
+      }], false, true)
       
       const dateInfo = selectedDate ? ` for ${new Date(selectedDate).toLocaleDateString()}` : ''
       console.log('[Dashboard] Flow Hourly chart updated with', allHours.length, 'hours (starting from 6 AM)' + dateInfo)
