@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: deploy-frontend
+    ports:
+      - "8888:80"
+    restart: unless-stopped
+    networks:
+      - deploy-network
+
+  mqtt-broker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: deploy-mqtt-broker
+    ports:
+      - "1883:1883"   # MQTT TCP
+      - "8084:8083"   # MQTT WebSocket
+      - "3001:3001"   # HTTP API
+      - "8085:8085"   # WebSocket Bridge
+    environment:
+      - MQTT_BROKER=mqtt://localhost:1883
+      - WS_PORT=8085
+      - START_PUBLISHER=true
+      - DB_HOST=timescaledb
+      - DB_PORT=5432
+      - DB_NAME=wwt_data
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    restart: unless-stopped
+    networks:
+      - deploy-network
+    depends_on:
+      - timescaledb
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: deploy-timescaledb
+    ports:
+      - "5436:5432"
+    environment:
+      - POSTGRES_DB=wwt_data
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    networks:
+      - deploy-network
+
+networks:
+  deploy-network:
+    driver: bridge
+
+volumes:
+  timescale-data:

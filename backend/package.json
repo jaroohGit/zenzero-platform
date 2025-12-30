@@ -1,0 +1,27 @@
+{
+  "name": "mqtt-broker",
+  "version": "1.0.0",
+  "description": "MQTT Broker Service",
+  "main": "mqtt-broker.js",
+  "scripts": {
+    "start": "node mqtt-broker.js",
+    "dev": "nodemon mqtt-broker.js",
+    "subscriber": "node mqtt-subscriber.js",
+    "subscriber-wwt02": "node mqtt-subscriber-wwt02.js",
+    "publisher": "node mqtt-publisher.js",
+    "websocket": "node websocket-server.js",
+    "monitor": "node mqtt-monitor-backend.js",
+    "monitor-dev": "nodemon mqtt-monitor-backend.js"
+  },
+  "dependencies": {
+    "aedes": "^0.51.0",
+    "mqtt": "^5.3.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "ws": "^8.16.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT Monitor - Real-time Topic Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            color: #667eea;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.connected {
+            background: #10b981;
+        }
+
+        .status-indicator.disconnected {
+            background: #ef4444;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .filter-input {
+            padding: 10px 15px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 14px;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1024px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .topics-panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .topics-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .topic-item {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #f9fafb;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+
+        .topic-item:hover {
+            background: #f3f4f6;
+            border-left-color: #667eea;
+        }
+
+        .topic-item.active {
+            background: #ede9fe;
+            border-left-color: #667eea;
+        }
+
+        .topic-name {
+            font-weight: 500;
+            font-size: 13px;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+
+        .topic-stats {
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .messages-panel {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .messages-panel h2 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .message-card {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 12px;
+            border-left: 4px solid #667eea;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .message-topic {
+            font-weight: 600;
+            color: #667eea;
+            font-size: 14px;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .message-payload {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .message-info {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #9ca3af;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #5568d3;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <span class="status-indicator" id="statusIndicator"></span>
+                MQTT Monitor
+            </h1>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-label">Total Messages</div>
+                    <div class="stat-value" id="totalMessages">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Topics</div>
+                    <div class="stat-value" id="topicsCount">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Messages/Min</div>
+                    <div class="stat-value" id="messageRate">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Connection</div>
+                    <div class="stat-value" id="connectionStatus" style="font-size: 16px;">
+                        <span class="badge badge-info" id="statusBadge">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <input type="text" class="filter-input" id="filterInput" placeholder="🔍 Filter by topic...">
+            <button class="btn btn-primary" onclick="togglePause()">
+                <span id="pauseBtn">⏸ Pause</span>
+            </button>
+            <button class="btn btn-primary" onclick="clearMessages()">🗑 Clear Display</button>
+            <button class="btn btn-danger" onclick="clearHistory()">⚠️ Clear All History</button>
+            <select class="filter-input" id="limitSelect" onchange="updateLimit()" style="max-width: 150px;">
+                <option value="50">Last 50</option>
+                <option value="100" selected>Last 100</option>
+                <option value="200">Last 200</option>
+                <option value="500">Last 500</option>
+            </select>
+        </div>
+
+        <div class="content">
+            <div class="topics-panel">
+                <h2>📋 Topics (<span id="topicCountSidebar">0</span>)</h2>
+                <div id="topicsList"></div>
+            </div>
+
+            <div class="messages-panel">
+                <h2>📨 Messages (<span id="messageCountDisplay">0</span>)</h2>
+                <div id="messagesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messages = [];
+        let topics = {};
+        let isPaused = false;
+        let selectedTopic = null;
+        let messageCount = 0;
+        let messageCountLastMinute = 0;
+        let lastMinuteTimestamp = Date.now();
+
+        const API_BASE = window.location.origin;
+        const WS_URL = `ws://${window.location.host}`;
+
+        // Connect to WebSocket
+        function connect() {
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                updateConnectionStatus(true);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                updateConnectionStatus(false);
+                setTimeout(connect, 3000); // Reconnect after 3 seconds
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            if (data.type === 'welcome') {
+                console.log(data.message);
+            } else if (data.type === 'history') {
+                messages = data.data;
+                updateTopicsFromMessages();
+                renderMessages();
+            } else if (data.type === 'message' && !isPaused) {
+                addMessage(data.data);
+            } else if (data.type === 'stats') {
+                updateStats(data.data);
+            }
+        }
+
+        function addMessage(message) {
+            messages.unshift(message);
+            messageCount++;
+            messageCountLastMinute++;
+            
+            // Update topic stats
+            if (!topics[message.topic]) {
+                topics[message.topic] = {
+                    count: 0,
+                    lastSeen: message.timestamp
+                };
+            }
+            topics[message.topic].count++;
+            topics[message.topic].lastSeen = message.timestamp;
+            
+            // Limit messages in memory
+            const limit = parseInt(document.getElementById('limitSelect').value);
+            if (messages.length > limit) {
+                messages = messages.slice(0, limit);
+            }
+            
+            updateDisplay();
+        }
+
+        function updateTopicsFromMessages() {
+            topics = {};
+            messages.forEach(msg => {
+                if (!topics[msg.topic]) {
+                    topics[msg.topic] = {
+                        count: 0,
+                        lastSeen: msg.timestamp
+                    };
+                }
+                topics[msg.topic].count++;
+                if (msg.timestamp > topics[msg.topic].lastSeen) {
+                    topics[msg.topic].lastSeen = msg.timestamp;
+                }
+            });
+        }
+
+        function updateDisplay() {
+            renderTopics();
+            renderMessages();
+            updateStats();
+        }
+
+        function renderTopics() {
+            const topicsList = document.getElementById('topicsList');
+            const sortedTopics = Object.entries(topics).sort((a, b) => 
+                new Date(b[1].lastSeen) - new Date(a[1].lastSeen)
+            );
+            
+            if (sortedTopics.length === 0) {
+                topicsList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No topics yet</p></div>';
+                return;
+            }
+            
+            topicsList.innerHTML = sortedTopics.map(([topic, stats]) => `
+                <div class="topic-item ${selectedTopic === topic ? 'active' : ''}" onclick="selectTopic('${topic.replace(/'/g, "\\'")}')">
+                    <div class="topic-name">${escapeHtml(topic)}</div>
+                    <div class="topic-stats">${stats.count} messages • ${formatTime(stats.lastSeen)}</div>
+                </div>
+            `).join('');
+            
+            document.getElementById('topicCountSidebar').textContent = sortedTopics.length;
+        }
+
+        function renderMessages() {
+            const messagesList = document.getElementById('messagesList');
+            const filterText = document.getElementById('filterInput').value.toLowerCase();
+            
+            let filteredMessages = messages;
+            if (selectedTopic) {
+                filteredMessages = messages.filter(msg => msg.topic === selectedTopic);
+            }
+            if (filterText) {
+                filteredMessages = filteredMessages.filter(msg => 
+                    msg.topic.toLowerCase().includes(filterText) ||
+                    JSON.stringify(msg.payload).toLowerCase().includes(filterText)
+                );
+            }
+            
+            document.getElementById('messageCountDisplay').textContent = filteredMessages.length;
+            
+            if (filteredMessages.length === 0) {
+                messagesList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No messages to display</p></div>';
+                return;
+            }
+            
+            messagesList.innerHTML = filteredMessages.map(msg => `
+                <div class="message-card">
+                    <div class="message-header">
+                        <div class="message-topic">${escapeHtml(msg.topic)}</div>
+                        <div class="message-time">${formatTimestamp(msg.timestamp)}</div>
+                    </div>
+                    <div class="message-payload">${formatPayload(msg.payload)}</div>
+                    <div class="message-info">Size: ${msg.size} bytes • ID: ${msg.id}</div>
+                </div>
+            `).join('');
+        }
+
+        function selectTopic(topic) {
+            selectedTopic = selectedTopic === topic ? null : topic;
+            updateDisplay();
+        }
+
+        function updateStats(data) {
+            if (data) {
+                document.getElementById('totalMessages').textContent = data.totalMessages || 0;
+                document.getElementById('topicsCount').textContent = data.topicsCount || 0;
+            } else {
+                document.getElementById('totalMessages').textContent = messageCount;
+                document.getElementById('topicsCount').textContent = Object.keys(topics).length;
+            }
+            
+            // Update message rate
+            const now = Date.now();
+            if (now - lastMinuteTimestamp >= 60000) {
+                document.getElementById('messageRate').textContent = messageCountLastMinute;
+                messageCountLastMinute = 0;
+                lastMinuteTimestamp = now;
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const badge = document.getElementById('statusBadge');
+            
+            if (connected) {
+                indicator.className = 'status-indicator connected';
+                badge.className = 'badge badge-success';
+                badge.textContent = 'Connected';
+            } else {
+                indicator.className = 'status-indicator disconnected';
+                badge.className = 'badge badge-info';
+                badge.textContent = 'Disconnected';
+            }
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById('pauseBtn');
+            btn.textContent = isPaused ? '▶️ Resume' : '⏸ Pause';
+        }
+
+        function clearMessages() {
+            messages = [];
+            selectedTopic = null;
+            updateDisplay();
+        }
+
+        async function clearHistory() {
+            if (!confirm('Are you sure you want to clear all message history on the server?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/clear`, { method: 'POST' });
+                const data = await response.json();
+                alert(`Cleared ${data.cleared} messages from history`);
+                clearMessages();
+                topics = {};
+                messageCount = 0;
+                updateDisplay();
+            } catch (error) {
+                console.error('Error clearing history:', error);
+                alert('Failed to clear history');
+            }
+        }
+
+        function updateLimit() {
+            const limit = parseInt(document.getElementById('limitSelect').value);
+            if (messages.length > limit) {
+                messages = messages.slice(0, limit);
+                updateDisplay();
+            }
+        }
+
+        function formatPayload(payload) {
+            if (typeof payload === 'object') {
+                return escapeHtml(JSON.stringify(payload, null, 2));
+            }
+            return escapeHtml(String(payload));
+        }
+
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString() + '.' + String(date.getMilliseconds()).padStart(3, '0');
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diff = now - date;
+            
+            if (diff < 60000) return 'just now';
+            if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+            if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+            return date.toLocaleDateString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Filter input handler
+        document.getElementById('filterInput').addEventListener('input', () => {
+            renderMessages();
+        });
+
+        // Initialize
+        connect();
+        
+        // Auto-refresh stats
+        setInterval(() => {
+            updateStats();
+        }, 1000);
+    </script>
+</body>
+</html>
