@@ -2868,6 +2868,14 @@ async function loadFlowHourlyData(selectedDate = null) {
       if (hourlyData[hour] && hourlyData[hour].max !== null && hourlyData[hour].min !== null) {
         const diff = hourlyData[hour].max - hourlyData[hour].min
         console.log(`[Flow] ${hour}: max=${hourlyData[hour].max}, min=${hourlyData[hour].min}, diff=${diff}`)
+        
+        // Filter out abnormal flow differences (likely meter resets/malfunctions)
+        // Normal hourly flow should not exceed 10,000 liters per hour
+        if (diff > 10000) {
+          console.warn(`[Flow] ${hour}: Abnormal flow difference detected: ${diff}, setting to 0`)
+          return 0
+        }
+        
         return diff > 0 ? diff : 0
       }
       console.log(`[Flow] ${hour}: NO DATA`)
@@ -3778,7 +3786,15 @@ async function loadFlowDailyData(selectedMonth = null) {
       const flowAccum = data.flow.max !== -Infinity && data.flow.min !== Infinity
         ? data.flow.max - data.flow.min
         : 0
-      flowValues.push(flowAccum)
+      
+      // Filter out abnormal daily flow differences (likely meter resets/malfunctions)
+      // Normal daily flow should not exceed 50,000 liters per day
+      if (flowAccum > 50000) {
+        console.warn(`[Daily Flow] ${dayKey}: Abnormal flow difference detected: ${flowAccum}, setting to 0`)
+        flowValues.push(0)
+      } else {
+        flowValues.push(flowAccum)
+      }
       
       // Calculate average ORP
       const avgOrp01 = data.orp01.count > 0 ? data.orp01.sum / data.orp01.count : 0
