@@ -11,6 +11,7 @@ services:
     restart: unless-stopped
     networks:
       - deploy-network
+      - csk-innovate_csk-network
 
   mqtt-broker:
     build:
@@ -21,10 +22,12 @@ services:
       - "1883:1883"   # MQTT TCP
       - "8084:8083"   # MQTT WebSocket
       - "3001:3001"   # HTTP API
+      - "3002:3002"   # API Server
       - "8085:8085"   # WebSocket Bridge
     environment:
       - MQTT_BROKER=mqtt://localhost:1883
       - WS_PORT=8085
+      - API_PORT=3002
       - START_PUBLISHER=true
       - DB_HOST=timescaledb
       - DB_PORT=5432
@@ -56,6 +59,9 @@ services:
 networks:
   deploy-network:
     driver: bridge
+  # External network to connect with CSK API
+  csk-innovate_csk-network:
+    external: true
 
 volumes:
   timescale-data:

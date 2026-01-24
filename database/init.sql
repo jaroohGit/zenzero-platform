@@ -38,6 +38,10 @@ CREATE TABLE IF NOT EXISTS wwt01_data (
     ph_sensor_06 DOUBLE PRECISION,
     orp_sensor_06 DOUBLE PRECISION,
     temp_06 DOUBLE PRECISION,
+    -- Level Sensors (KM30)
+    at_01_level DOUBLE PRECISION,
+    sump_pump_water_level DOUBLE PRECISION,
+    at_02_level DOUBLE PRECISION,
     -- Flow Meters (DOUBLE PRECISION for Float values)
     flow_meter_no4_realtime DOUBLE PRECISION,
     flow_meter_no4_forward INTEGER,

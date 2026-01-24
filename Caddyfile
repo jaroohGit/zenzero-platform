@@ -1,16 +1,25 @@
 www.zenzerobiogas.com {
 	# Automatically handles HTTPS with Let's Encrypt
 
+	# Chat API endpoint - reverse proxy to CSK API
+	handle /api/chat* {
+		reverse_proxy localhost:3010
+	}
+
 	# API endpoint - reverse proxy to backend
 	handle /api/* {
 		reverse_proxy localhost:3001
 	}
 
-	# WebSocket endpoint for MQTT
-	handle_path /mqtt {
-		reverse_proxy localhost:8084 {
-			header_up Upgrade {http.request.header.Upgrade}
-			header_up Connection {http.request.header.Connection}
+	# WebSocket endpoint for MQTT (must use HTTP/1.1)
+	@websocket {
+		path /mqtt*
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	reverse_proxy @websocket localhost:8085 {
+		transport http {
+			versions 1.1
 		}
 	}
 
@@ -34,4 +43,28 @@ www.zenzerobiogas.com {
 # Redirect non-www to www
 zenzerobiogas.com {
 	redir https://www.zenzerobiogas.com{uri} permanent
+}
+
+# CSK Innovate - Company Website
+www.cskinnovate.com {
+	# Automatically handles HTTPS with Let's Encrypt
+	
+	# Reverse proxy to Next.js app
+	reverse_proxy localhost:3000
+	
+	# Enable gzip compression
+	encode gzip
+	
+	# Security headers
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		-Server
+	}
+}
+
+# Redirect non-www to www for CSK
+cskinnovate.com {
+	redir https://www.cskinnovate.com{uri} permanent
 }

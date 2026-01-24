@@ -47,6 +47,7 @@ async function insertWWT01Data(data, topic) {
       ph_sensor_04, orp_sensor_04, temp_04,
       ph_sensor_05, orp_sensor_05, temp_05,
       ph_sensor_06, orp_sensor_06, temp_06,
+      at_01_level, sump_pump_water_level, at_02_level,
       flow_meter_no4_realtime, flow_meter_no4_forward,
       flow_meter_no1_realtime, flow_meter_no1_forward,
       flow_meter_no2_realtime, flow_meter_no2_forward,
@@ -66,9 +67,10 @@ async function insertWWT01Data(data, topic) {
     VALUES (
       NOW(),
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-      $19, $20, $21, $22, $23, $24, $25, $26,
-      $27, $28, $29, $30, $31, $32, $33, $34, $35,
-      $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51
+      $19, $20, $21,
+      $22, $23, $24, $25, $26, $27, $28, $29,
+      $30, $31, $32, $33, $34, $35, $36, $37, $38,
+      $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54
     )
   `
   
@@ -92,6 +94,9 @@ async function insertWWT01Data(data, topic) {
       data.PH_Sensor_06 || null,
       data.ORP_Sensor_06 || null,
       data.Temp_06 || null,
+      data.AT_01_Level || null,
+      data.Sump_Pump_Water_Level || null,
+      data.AT_02_Level || null,
       data.Flow_Meter_No4_RealTime || null,
       data.Flow_Meter_No4_Forward || null,
       data.Flow_Meter_No1_RealTime || null,
@@ -214,6 +219,9 @@ async function getWWT01Data(minutes = 60, limit = 1000) {
            AVG(ph_sensor_06) as ph_sensor_06,
            AVG(orp_sensor_06) as orp_sensor_06,
            AVG(temp_06) as temp_06,
+           AVG(at_01_level) as at_01_level,
+           AVG(sump_pump_water_level) as sump_pump_water_level,
+           AVG(at_02_level) as at_02_level,
            AVG(flow_meter_no4_realtime) as flow_meter_no4_realtime,
            MAX(flow_meter_no4_forward) as flow_meter_no4_forward,
            AVG(flow_meter_no1_realtime) as flow_meter_no1_realtime,

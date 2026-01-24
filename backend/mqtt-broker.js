@@ -183,6 +183,115 @@ app.get('/api/wwt01/latest', async (req, res) => {
   }
 })
 
+// AT-02 Inlet Tank APIs
+app.get('/api/wwt01/at02-inlet-hourly', async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query
+    
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'startDate and endDate are required' })
+    }
+
+    const query = `
+      WITH hourly_data AS (
+        SELECT 
+          DATE_TRUNC('hour', time) as hour,
+          at_02_level,
+          time,
+          FIRST_VALUE(at_02_level) OVER (
+            PARTITION BY DATE_TRUNC('hour', time) 
+            ORDER BY time ASC
+          ) as first_level,
+          FIRST_VALUE(at_02_level) OVER (
+            PARTITION BY DATE_TRUNC('hour', time) 
+            ORDER BY time DESC
+          ) as last_level
+        FROM wwt01_data 
+        WHERE time >= $1 
+          AND time < $2 
+          AND at_02_level IS NOT NULL
+      ),
+      distinct_hours AS (
+        SELECT DISTINCT
+          hour,
+          first_level,
+          last_level
+        FROM hourly_data
+      )
+      SELECT 
+        hour,
+        first_level as level_start,
+        last_level as level_end,
+        CASE 
+          WHEN first_level > last_level 
+          THEN ROUND(((first_level - last_level) * 3500)::numeric, 2)
+          ELSE 0
+        END as volume_outlet
+      FROM distinct_hours
+      WHERE first_level > last_level
+      ORDER BY hour ASC
+    `
+
+    const result = await db.pool.query(query, [startDate, endDate])
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching AT-02 hourly data:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+app.get('/api/wwt01/at02-inlet-monthly', async (req, res) => {
+  try {
+    const { months = 12 } = req.query
+
+    const query = `
+      WITH hourly_data AS (
+        SELECT 
+          DATE_TRUNC('hour', time) as hour,
+          at_02_level,
+          time,
+          FIRST_VALUE(at_02_level) OVER (
+            PARTITION BY DATE_TRUNC('hour', time) 
+            ORDER BY time ASC
+          ) as first_level,
+          FIRST_VALUE(at_02_level) OVER (
+            PARTITION BY DATE_TRUNC('hour', time) 
+            ORDER BY time DESC
+          ) as last_level
+        FROM wwt01_data 
+        WHERE time >= NOW() - INTERVAL '${parseInt(months)} months'
+          AND at_02_level IS NOT NULL
+      ),
+      distinct_hours AS (
+        SELECT DISTINCT
+          hour,
+          first_level,
+          last_level
+        FROM hourly_data
+        WHERE first_level > last_level
+      ),
+      monthly_volume AS (
+        SELECT 
+          DATE_TRUNC('month', hour) as month,
+          SUM((first_level - last_level) * 3500) as total_volume
+        FROM distinct_hours
+        GROUP BY DATE_TRUNC('month', hour)
+      )
+      SELECT 
+        month,
+        ROUND(total_volume::numeric, 2) as total_volume
+      FROM monthly_volume
+      ORDER BY month ASC
+    `
+
+    const result = await db.pool.query(query)
+    res.json(result.rows)
+  } catch (err) {
+    console.error('Error fetching AT-02 monthly data:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 // Start Servers
 mqttServer.listen(MQTT_PORT, () => {
   console.log(`🚀 MQTT Broker started on port ${MQTT_PORT}`)

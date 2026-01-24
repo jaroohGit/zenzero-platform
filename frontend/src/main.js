@@ -1,6 +1,7 @@
 import './style.css'
 import mqtt from 'mqtt'
 import ApexCharts from 'apexcharts'
+import { createChatButton } from './chat-button.js'
 
 const app = document.querySelector('#app')
 
@@ -421,14 +422,23 @@ function updateChartsTheme(mode) {
 const getWebSocketURL = () => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host // includes hostname and port if any
+  const hostname = window.location.hostname
   
-  // Development mode - connect directly to backend port
-  if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':5173')) {
-    return 'ws://localhost:8084'
+  console.log('🌐 Current host:', host)
+  console.log('🖥️ Hostname:', hostname)
+  console.log('🔌 Protocol:', protocol)
+  
+  // Development mode ONLY for actual localhost/127.0.0.1
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const devUrl = 'ws://localhost:8085'
+    console.log('✅ Development mode - Using', devUrl)
+    return devUrl
   }
   
-  // Production mode - Use same host with /mqtt path (Caddy will reverse proxy to 8084)
-  return `${protocol}//${host}/mqtt`
+  // Production mode - Use same host with /mqtt path (Reverse proxy required)
+  const prodUrl = `${protocol}//${host}/mqtt`
+  console.log('🏭 Production mode - Using', prodUrl)
+  return prodUrl
 }
 
 const MQTT_BROKER = getWebSocketURL()
@@ -438,7 +448,6 @@ let latestData = {
   'zenzero/wwt01': {},
   'zenzero/wwt02': {}
 }
-let mlUpdateCounter = 0
 
 // Get API Base URL based on environment
 const getAPIBaseURL = () => {
@@ -453,7 +462,20 @@ const getAPIBaseURL = () => {
   return '/api'
 }
 
+function getAPIBaseURL3002() {
+  const host = window.location.hostname
+  
+  // Development mode - connect to port 3002
+  if (host.includes('localhost') || host.includes('127.0.0.1') || host.includes(':5173')) {
+    return 'http://localhost:3002/api'
+  }
+  
+  // Production mode - use relative path (Caddy will reverse proxy)
+  return '/api'
+}
+
 const API_BASE_URL = getAPIBaseURL()
+const API_BASE_URL_3002 = getAPIBaseURL3002()
 
 // Connect to MQTT Broker
 function connectMQTT() {
@@ -475,8 +497,14 @@ function connectMQTT() {
     })
 
     mqttClient.on('connect', () => {
-      console.log('Connected to MQTT Broker')
-      statusEl.innerHTML = '<span class=\"status-dot connected\"></span><span class=\"status-text\">Connected</span>'
+      console.log('✅ Connected to MQTT Broker')
+      console.log('Status Element:', statusEl)
+      if (statusEl) {
+        statusEl.innerHTML = '<span class=\"status-dot connected\"></span><span class=\"status-text\">Connected</span>'
+        console.log('✅ Status updated to Connected')
+      } else {
+        console.error('❌ statusEl not found!')
+      }
       
       // Subscribe to all topics
       MQTT_TOPICS.forEach(topic => {
@@ -502,13 +530,7 @@ function connectMQTT() {
           // Update dashboard with Lohand charts and Flow/Energy charts
           updateLohandCharts(data)
           updateFlowEnergyChartsRealtime(data)
-          
-          // Auto-update ML prediction every 10 messages (approximately 30 seconds)
-          mlUpdateCounter++
-          if (mlUpdateCounter >= 10) {
-            mlUpdateCounter = 0
-            loadMLPredictionData()
-          }
+          updateAT02LevelChartRealtime(data)
         } else if (currentPage === 'orp-analysis' && topic === 'zenzero/wwt01') {
           // Update ORP Analysis
           updateORPAnalysisRealtime(data)
@@ -519,15 +541,20 @@ function connectMQTT() {
     })
 
     mqttClient.on('error', (err) => {
-      console.error('MQTT Error:', err)
-      statusEl.innerHTML = '<span class=\"status-dot error\"></span><span class=\"status-text\">Error</span>'
+      console.error('❌ MQTT Error:', err)
+      if (statusEl) {
+        statusEl.innerHTML = '<span class=\"status-dot error\"></span><span class=\"status-text\">Error</span>'
+      }
     })
 
     mqttClient.on('close', () => {
-      statusEl.innerHTML = '<span class=\"status-dot\"></span><span class=\"status-text\">Disconnected</span>'
+      console.log('⚠️ MQTT Connection Closed')
+      if (statusEl) {
+        statusEl.innerHTML = '<span class=\"status-dot\"></span><span class=\"status-text\">Disconnected</span>'
+      }
     })
   } catch (err) {
-    console.error('Failed to connect:', err)
+    console.error('❌ Failed to connect:', err)
     statusEl.innerHTML = '<span class=\"status-dot error\"></span><span class=\"status-text\">Failed</span>'
   }
 }
@@ -538,54 +565,6 @@ const pages = {
     title: 'Dashboard - Real-time Lohand Monitoring',
     description: 'Live monitoring of Lohand AT-1, AT-2, and AT-3 sensors',
     content: `
-      <!-- Time Range Selector -->
-      <div class="card" style="margin-bottom: 20px; padding: 15px;">
-        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
-          <label class="filter-label">Historical Data Range:</label>
-          <select id="dashboard-time-range" class="filter-select">
-            <option value="5">Last 5 minutes</option>
-            <option value="15">Last 15 minutes</option>
-            <option value="30" selected>Last 30 minutes</option>
-            <option value="60">Last 1 hour</option>
-            <option value="180">Last 3 hours</option>
-          </select>
-          <button id="dashboard-reload-btn" class="btn-primary" style="padding: 8px 20px;">Reload Data</button>
-          <button id="ml-train-btn" class="btn-primary" style="padding: 8px 20px; background: #10b981;">Train ML Model</button>
-          <span id="dashboard-status" class="status-text" style="margin-left: auto;">Loading...</span>
-        </div>
-      </div>
-
-      <!-- ML Prediction Chart -->
-      <div class="card chart-container full-width" style="margin-bottom: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-          <h3 class="chart-section-header" style="margin: 0;">🤖 ML Prediction: ORP-Out (15 min ahead)</h3>
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <button id="ml-refresh-btn" class="btn-primary" style="padding: 8px 15px;">Refresh</button>
-          </div>
-        </div>
-        <div style="padding: 10px;">
-          <div id="chart-ml-prediction" style="width: 100%; height: 350px;"></div>
-        </div>
-        <div style="padding: 15px; background: #f8fafc; border-radius: 0 0 8px 8px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
-          <div style="text-align: center;">
-            <div style="color: #64748b; font-size: 12px;">Current ORP 02</div>
-            <div id="ml-current-value" style="font-size: 24px; font-weight: bold; color: #3b82f6;">--</div>
-          </div>
-          <div style="text-align: center;">
-            <div style="color: #64748b; font-size: 12px;">Predicted (15min)</div>
-            <div id="ml-predicted-value" style="font-size: 24px; font-weight: bold; color: #8b5cf6;">--</div>
-          </div>
-          <div style="text-align: center;">
-            <div style="color: #64748b; font-size: 12px;">Difference</div>
-            <div id="ml-difference-value" style="font-size: 24px; font-weight: bold; color: #10b981;">--</div>
-          </div>
-          <div style="text-align: center;">
-            <div style="color: #64748b; font-size: 12px;">Accuracy</div>
-            <div id="ml-accuracy-value" style="font-size: 24px; font-weight: bold; color: #f59e0b;">--</div>
-          </div>
-        </div>
-      </div>
-
       <!-- Flow Accumulation Hourly Chart (แถวแรก) -->
       <div class="card chart-container full-width" style="margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
@@ -605,7 +584,7 @@ const pages = {
       <!-- Flow Accumulation Daily/Monthly Chart -->
       <div class="card chart-container full-width" style="margin-bottom: 20px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-          <h3 class="chart-section-header" style="margin: 0;">Flow Meter No.1 - Daily Accumulation (Monthly View)</h3>
+          <h3 class="chart-section-header" style="margin: 0;">Flow Meter No.1 - Daily Flow, ORP & Energy (Monthly View)</h3>
           <div style="display: flex; align-items: center; gap: 10px;">
             <label class="filter-label">Select Month:</label>
             <input type="month" id="flow-daily-chart-month" class="filter-select" style="padding: 8px;" />
@@ -615,6 +594,91 @@ const pages = {
         </div>
         <div style="padding: 10px;">
           <div id="chart-flow-daily" style="width: 100%; height: 400px;"></div>
+        </div>
+      </div>
+
+      <!-- AT-02 Level Real-time Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 10px 0 10px;">
+          <h3 class="chart-section-header" style="margin: 0;">📊 AT-02 Water Level - Real-time Monitoring</h3>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label style="font-size: 12px; color: #64748b;">Threshold:</label>
+            <input 
+              type="number" 
+              id="at02-threshold-input" 
+              value="-0.005" 
+              step="0.001" 
+              min="-1" 
+              max="0" 
+              style="width: 80px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 12px;"
+            />
+            <button 
+              id="at02-threshold-apply" 
+              style="padding: 4px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;"
+            >Apply</button>
+          </div>
+        </div>
+        <div style="padding: 10px;">
+          <div id="chart-at02-level" style="width: 100%; height: 350px;"></div>
+        </div>
+      </div>
+
+      <!-- AT-02 Inlet Volume Hourly Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+          <h3 class="chart-section-header" style="margin: 0;">💧 AT-02 Outlet Volume - Hourly Accumulation Comparison</h3>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label class="filter-label">Select Date:</label>
+            <input type="date" id="at02-chart-date" class="filter-select" style="padding: 8px;" />
+            <button id="at02-chart-today-btn" class="btn-primary" style="padding: 8px 15px;">Today</button>
+            <button id="at02-chart-load-btn" class="btn-primary" style="padding: 8px 15px;">Load</button>
+          </div>
+        </div>
+        <div style="padding: 10px;">
+          <div id="chart-at02-hourly" style="width: 100%; height: 400px;"></div>
+        </div>
+      </div>
+
+      <!-- AT-02 Outlet Volume Monthly Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <div style="padding: 15px;">
+          <h3 class="chart-section-header" style="margin: 0 0 10px 0;">💧 AT-02 Outlet Volume - Monthly Comparison</h3>
+          <p style="color: #6b7280; font-size: 14px; margin-bottom: 15px;">Total outlet water volume calculated from AT-02 level decreases only (increases/constant = not counted)</p>
+          <div id="chart-at02-inlet" style="width: 100%; height: 400px;"></div>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 20px;">
+            <div style="text-align: center; padding: 15px; background: #eff6ff; border-radius: 8px;">
+              <div style="color: #6b7280; font-size: 14px;">Current Month Total</div>
+              <div id="at02-current-month-total" style="font-size: 28px; font-weight: bold; color: #3b82f6; margin-top: 5px;">0 m³</div>
+            </div>
+            <div style="text-align: center; padding: 15px; background: #f3f4f6; border-radius: 8px;">
+              <div style="color: #6b7280; font-size: 14px;">Same Month Last Year</div>
+              <div id="at02-last-year-total" style="font-size: 28px; font-weight: bold; color: #6b7280; margin-top: 5px;">0 m³</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AT-02 ORP Sensors Chart -->
+      <div class="card chart-container full-width" style="margin-bottom: 20px;">
+        <h3 class="chart-section-header">AT-02 ORP Sensors (ORP-03, ORP-04)</h3>
+        <div style="padding: 10px;">
+          <div id="chart-at02-orp-sensors" style="width: 100%; height: 400px;"></div>
+        </div>
+      </div>
+
+      <!-- Time Range Selector -->
+      <div class="card" style="margin-bottom: 20px; padding: 15px;">
+        <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+          <label class="filter-label">Historical Data Range:</label>
+          <select id="dashboard-time-range" class="filter-select">
+            <option value="5">Last 5 minutes</option>
+            <option value="15">Last 15 minutes</option>
+            <option value="30" selected>Last 30 minutes</option>
+            <option value="60">Last 1 hour</option>
+            <option value="180">Last 3 hours</option>
+          </select>
+          <button id="dashboard-reload-btn" class="btn-primary" style="padding: 8px 20px;">Reload Data</button>
+          <span id="dashboard-status" class="status-text" style="margin-left: auto;">Loading...</span>
         </div>
       </div>
 
@@ -654,13 +718,18 @@ const pages = {
       setTimeout(() => {
         console.log('[Dashboard] Starting initialization after timeout')
         try {
-          initializeMLPredictionChart()
           initializeFlowHourlyChart()
           initializeFlowDailyChart()
+          initializeAT02LevelChart()
+          initializeAT02HourlyChart()
+          initializeAT02InletChart()
+          initializeAT02ORPChart()
           initializeLohandCharts()
-          loadMLPredictionData()
           loadFlowHourlyData()
           loadFlowDailyData()
+          loadAT02LevelData()
+          loadAT02HourlyData()
+          loadAT02InletData()
           loadDashboardHistoricalData()
           setupDashboardHandlers()
         } catch (err) {
@@ -710,6 +779,11 @@ const pages = {
               <div class="sensor-value" id="wwt01-D1006">--</div>
               <span class="sensor-unit">°C</span>
             </div>
+            <div class="sensor-item">
+              <label>AT-01 Level</label>
+              <div class="sensor-value" id="wwt01-D1128">--</div>
+              <span class="sensor-unit">m³</span>
+            </div>
           </div>
         </div>
 
@@ -748,6 +822,16 @@ const pages = {
               <label>Temp - 04</label>
               <div class="sensor-value" id="wwt01-D1036">--</div>
               <span class="sensor-unit">°C</span>
+            </div>
+            <div class="sensor-item">
+              <label>Sump Pump Water Level</label>
+              <div class="sensor-value" id="wwt01-D1130">--</div>
+              <span class="sensor-unit">m³</span>
+            </div>
+            <div class="sensor-item">
+              <label>AT-02 Level</label>
+              <div class="sensor-value" id="wwt01-D1132">--</div>
+              <span class="sensor-unit">m³</span>
             </div>
           </div>
         </div>
@@ -1506,8 +1590,11 @@ const pages = {
                 <th rowspan="2" style="vertical-align: middle;">Time</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-1 Sensor 1</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-1 Sensor 2</th>
+                <th style="text-align: center; border-bottom: 1px solid #ddd;">AT-1 Level</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-2 Sensor 3</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-2 Sensor 4</th>
+                <th style="text-align: center; border-bottom: 1px solid #ddd;">Sump Level</th>
+                <th style="text-align: center; border-bottom: 1px solid #ddd;">AT-2 Level</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-3 Sensor 5</th>
                 <th colspan="3" style="text-align: center; border-bottom: 1px solid #ddd;">AT-3 Sensor 6</th>
                 <th colspan="2" style="text-align: center; border-bottom: 1px solid #ddd;">Flow-1</th>
@@ -1520,8 +1607,11 @@ const pages = {
               <tr>
                 <th>PH</th><th>ORP</th><th>Temp</th>
                 <th>PH</th><th>ORP</th><th>Temp</th>
+                <th>m³</th>
                 <th>PH</th><th>ORP</th><th>Temp</th>
                 <th>PH</th><th>ORP</th><th>Temp</th>
+                <th>m³</th>
+                <th>m³</th>
                 <th>PH</th><th>ORP</th><th>Temp</th>
                 <th>PH</th><th>ORP</th><th>Temp</th>
                 <th>RT</th><th>Fwd</th>
@@ -1534,7 +1624,7 @@ const pages = {
             </thead>
             <tbody id="table-body">
               <tr>
-                <td colspan="34" class="loading-cell" style="text-align: center; padding: 20px;">Click "Load Data" to view historical data</td>
+                <td colspan="37" class="loading-cell" style="text-align: center; padding: 20px;">Click "Load Data" to view historical data</td>
               </tr>
             </tbody>
           </table>
@@ -1739,6 +1829,11 @@ function updateWWT01Display(data) {
   updateSensor('wwt01-D1003', data.PH_Sensor_02, formatValue)   // PH Sensor 02
   updateSensor('wwt01-D1005', data.ORP_Sensor_02, formatValue)  // ORP sensor 02
   updateSensor('wwt01-D1006', data.Temp_02, formatValue)        // Temp 02
+  // AT-01 Level (D1128) - already multiplied by 0.2 from MQTT, just multiply by 3500 for volume in m³
+  if (data.AT_01_Level !== undefined && data.AT_01_Level !== null && data.AT_01_Level !== -32768) {
+    const volume = data.AT_01_Level * 3500
+    updateSensor('wwt01-D1128', volume, (v) => v.toFixed(2))
+  }
   
   // Lohand No.2 (AT-2)
   updateSensor('wwt01-D1029', data.PH_Sensor_03, formatValue)   // PH Sensor 03
@@ -1747,6 +1842,16 @@ function updateWWT01Display(data) {
   updateSensor('wwt01-D1033', data.PH_Sensor_04, formatValue)   // PH Sensor 04
   updateSensor('wwt01-D1035', data.ORP_Sensor_04, formatValue)  // ORP sensor 04
   updateSensor('wwt01-D1036', data.Temp_04, formatValue)        // Temp 04
+  // Sump Pump Water Level (D1130) - already multiplied by 0.3 from MQTT, just multiply by 3500 for volume in m³
+  if (data.Sump_Pump_Water_Level !== undefined && data.Sump_Pump_Water_Level !== null && data.Sump_Pump_Water_Level !== -32768) {
+    const volume = data.Sump_Pump_Water_Level * 3500
+    updateSensor('wwt01-D1130', volume, (v) => v.toFixed(2))
+  }
+  // AT-02 Level (D1132) - already multiplied by 0.3 from MQTT, just multiply by 3500 for volume in m³
+  if (data.AT_02_Level !== undefined && data.AT_02_Level !== null && data.AT_02_Level !== -32768) {
+    const volume = data.AT_02_Level * 3500
+    updateSensor('wwt01-D1132', volume, (v) => v.toFixed(2))
+  }
   
   // Lohand No.3 (AT-3)
   updateSensor('wwt01-D1049', data.PH_Sensor_05, formatValue)   // PH Sensor 05
@@ -2323,7 +2428,6 @@ let lohandCharts = {
 
 let flowHourlyChart = null
 let flowDailyChart = null
-let mlPredictionChart = null
 
 let lohandData = {
   at1: { 
@@ -2547,8 +2651,12 @@ function initializeFlowHourlyChart() {
         show: true,
         tools: {
           download: true,
-          zoom: true,
-          pan: true
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
         }
       },
       foreColor: isDark ? '#94a3b8' : '#64748b',
@@ -3155,273 +3263,6 @@ async function loadFlowHourlyData(selectedDate = null) {
   }
 }
 
-// Initialize ML Prediction Chart
-function initializeMLPredictionChart() {
-  console.log('[ML] Initializing ML Prediction Chart...')
-  
-  const chartEl = document.getElementById('chart-ml-prediction')
-  if (!chartEl) {
-    console.error('[ML] Chart container not found')
-    return
-  }
-  
-  const isDark = document.documentElement.classList.contains('dark')
-  
-  const options = {
-    series: [{
-      name: 'Actual ORP 02',
-      type: 'line',
-      data: []
-    }, {
-      name: 'Predicted ORP 02',
-      type: 'line',
-      data: []
-    }],
-    chart: {
-      type: 'line',
-      height: 350,
-      toolbar: { 
-        show: true,
-        tools: {
-          download: true,
-          zoom: true,
-          pan: true
-        }
-      },
-      foreColor: isDark ? '#94a3b8' : '#64748b',
-      background: isDark ? '#1e293b' : '#ffffff',
-      animations: {
-        enabled: true,
-        dynamicAnimation: {
-          enabled: true,
-          speed: 1000
-        }
-      }
-    },
-    stroke: {
-      show: true,
-      width: [3, 3],
-      colors: ['#3b82f6', '#8b5cf6'],
-      curve: 'smooth',
-      dashArray: [0, 5]
-    },
-    markers: {
-      size: [4, 6],
-      colors: ['#3b82f6', '#8b5cf6'],
-      strokeWidth: 0,
-      hover: {
-        size: 6
-      }
-    },
-    xaxis: {
-      type: 'datetime',
-      title: {
-        text: 'Time',
-        style: {
-          color: isDark ? '#cbd5e1' : '#0f172a',
-          fontSize: '12px'
-        }
-      },
-      labels: {
-        format: 'HH:mm',
-        style: {
-          colors: isDark ? '#94a3b8' : '#64748b',
-          fontSize: '10px'
-        }
-      }
-    },
-    yaxis: {
-      title: {
-        text: 'ORP-Out (mV)',
-        style: {
-          color: isDark ? '#cbd5e1' : '#0f172a',
-          fontSize: '12px'
-        }
-      },
-      labels: {
-        formatter: function(val) {
-          return val ? val.toFixed(1) : '0'
-        },
-        style: {
-          colors: isDark ? '#94a3b8' : '#64748b'
-        }
-      }
-    },
-    tooltip: {
-      theme: isDark ? 'dark' : 'light',
-      shared: true,
-      intersect: false,
-      x: {
-        format: 'dd/MM/yyyy HH:mm'
-      },
-      y: {
-        formatter: function (val) {
-          return val ? val.toFixed(2) + ' mV' : '0 mV'
-        }
-      }
-    },
-    title: {
-      text: 'Real-time vs Predicted ORP Values',
-      align: 'left',
-      style: {
-        fontSize: '14px',
-        fontWeight: 600,
-        color: isDark ? '#cbd5e1' : '#0f172a'
-      }
-    },
-    grid: {
-      borderColor: isDark ? '#334155' : '#e2e8f0'
-    },
-    legend: {
-      show: true,
-      position: 'top',
-      horizontalAlign: 'right',
-      labels: {
-        colors: isDark ? '#94a3b8' : '#64748b'
-      },
-      markers: {
-        width: 12,
-        height: 12,
-        radius: 6
-      }
-    }
-  }
-  
-  mlPredictionChart = new ApexCharts(chartEl, options)
-  mlPredictionChart.render()
-  console.log('[ML] ML Prediction Chart initialized')
-}
-
-// Load ML Prediction Data
-async function loadMLPredictionData() {
-  console.log('[ML] Loading prediction data...')
-  
-  const statusEl = document.getElementById('ml-status-text')
-  if (statusEl) statusEl.textContent = 'Loading...'
-  
-  try {
-    // Get prediction from backend
-    const response = await fetch(`${API_BASE_URL}/ml/predict-orp`)
-    if (!response.ok) throw new Error('Failed to fetch prediction')
-    
-    const result = await response.json()
-    
-    if (!result.success) {
-      console.error('[ML] Prediction failed:', result.error)
-      if (statusEl) statusEl.textContent = 'Model not trained'
-      return
-    }
-    
-    const prediction = result.data
-    console.log('[ML] Prediction:', prediction)
-    
-    // Update status cards
-    document.getElementById('ml-current-value').textContent = prediction.current_orp_02 + ' mV'
-    document.getElementById('ml-predicted-value').textContent = prediction.predicted_orp_02 + ' mV'
-    
-    const diff = Math.abs(prediction.predicted_orp_02 - prediction.current_orp_02)
-    document.getElementById('ml-difference-value').textContent = diff.toFixed(2) + ' mV'
-    document.getElementById('ml-difference-value').style.color = diff < 20 ? '#10b981' : diff < 50 ? '#f59e0b' : '#ef4444'
-    
-    // Calculate accuracy (inverse of error percentage)
-    const accuracy = Math.max(0, 100 - (diff / Math.abs(prediction.current_orp_02) * 100))
-    document.getElementById('ml-accuracy-value').textContent = accuracy.toFixed(1) + '%'
-    document.getElementById('ml-accuracy-value').style.color = accuracy > 90 ? '#10b981' : accuracy > 70 ? '#f59e0b' : '#ef4444'
-    
-    if (statusEl) statusEl.textContent = '✓ Active'
-    
-    // Get historical data for comparison
-    const histResponse = await fetch(`${API_BASE_URL}/wwt01/history?minutes=60&limit=100`)
-    const histData = await histResponse.json()
-    
-    if (histData && histData.length > 0) {
-      // Prepare chart data
-      const actualData = []
-      const predictedData = []
-      
-      histData.forEach(row => {
-        const timestamp = new Date(row.time).getTime()
-        const actualOrp = parseFloat(row.orp_sensor_02) || 0
-        
-        if (actualOrp !== 0) {
-          actualData.push({ x: timestamp, y: actualOrp })
-          
-          // For demonstration, add some predicted values (in production, these would come from stored predictions)
-          // Here we simulate by adding some variation
-          const predictedOrp = actualOrp + (Math.random() - 0.5) * 30
-          predictedData.push({ x: timestamp, y: predictedOrp })
-        }
-      })
-      
-      // Add current prediction point (15 minutes in future)
-      const predictionTimestamp = new Date(prediction.prediction_time).getTime()
-      predictedData.push({ 
-        x: predictionTimestamp, 
-        y: prediction.predicted_orp_02 
-      })
-      
-      // Update chart
-      if (mlPredictionChart) {
-        mlPredictionChart.updateSeries([
-          { name: 'Actual ORP 02', data: actualData },
-          { name: 'Predicted ORP 02 (15min ahead)', data: predictedData }
-        ])
-      }
-    }
-    
-  } catch (error) {
-    console.error('[ML] Error loading prediction:', error)
-    if (statusEl) statusEl.textContent = '✗ Error'
-  }
-}
-
-// Train ML Model
-async function trainMLModel() {
-  const statusEl = document.getElementById('ml-status-text')
-  if (statusEl) statusEl.textContent = 'Training...'
-  
-  const trainBtn = document.getElementById('ml-train-btn')
-  if (trainBtn) {
-    trainBtn.disabled = true
-    trainBtn.textContent = 'Training...'
-  }
-  
-  try {
-    console.log('[ML] Starting model training...')
-    
-    const response = await fetch(`${API_BASE_URL}/ml/train?days=30`, {
-      method: 'POST'
-    })
-    
-    const result = await response.json()
-    
-    if (result.success) {
-      console.log('[ML] Training completed successfully')
-      if (statusEl) statusEl.textContent = '✓ Training Complete'
-      alert('ML Model trained successfully!\n\nYou can now view predictions.')
-      
-      // Reload prediction data
-      setTimeout(() => {
-        loadMLPredictionData()
-      }, 2000)
-    } else {
-      console.error('[ML] Training failed:', result.error)
-      if (statusEl) statusEl.textContent = '✗ Training Failed'
-      alert('Training failed: ' + result.error)
-    }
-    
-  } catch (error) {
-    console.error('[ML] Training error:', error)
-    if (statusEl) statusEl.textContent = '✗ Error'
-    alert('Training error: ' + error.message)
-  } finally {
-    if (trainBtn) {
-      trainBtn.disabled = false
-      trainBtn.textContent = 'Train ML Model'
-    }
-  }
-}
-
 // Initialize Flow Daily Chart
 function initializeFlowDailyChart() {
   console.log('[Dashboard] Initializing Flow Daily Chart...')
@@ -3453,7 +3294,7 @@ function initializeFlowDailyChart() {
       data: []
     }, {
       name: 'Energy/Flow (kWh/m³)',
-      type: 'line',
+      type: 'bar',
       data: []
     }],
     chart: {
@@ -3481,7 +3322,7 @@ function initializeFlowDailyChart() {
     },
     dataLabels: {
       enabled: true,
-      enabledOnSeries: [0, 1, 2, 3],
+      enabledOnSeries: [0, 1, 2, 3, 4],
       formatter: function (val) {
         return val ? val.toFixed(2) : '0.00'
       },
@@ -3502,8 +3343,8 @@ function initializeFlowDailyChart() {
     },
     stroke: {
       show: true,
-      width: [0, 3, 3, 3],
-      colors: ['transparent', '#f59e0b', '#10b981', '#ef4444'],
+      width: [0, 3, 3, 3, 0],
+      colors: ['transparent', '#f59e0b', '#10b981', '#ef4444', 'transparent'],
       curve: 'smooth'
     },
     xaxis: {
@@ -3551,7 +3392,7 @@ function initializeFlowDailyChart() {
       },
       labels: {
         formatter: function(val) {
-          return val ? val.toFixed(1) : '0'
+          return val ? val.toFixed(0) : '0'
         },
         style: {
           colors: isDark ? '#94a3b8' : '#64748b'
@@ -3581,8 +3422,8 @@ function initializeFlowDailyChart() {
       }
     }],
     fill: {
-      opacity: [1, 0.9, 0.9, 0.9],
-      colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+      opacity: [1, 0.9, 0.9, 0.9, 0.9],
+      colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#f59e0b']
     },
     tooltip: {
       theme: isDark ? 'dark' : 'light',
@@ -3592,6 +3433,11 @@ function initializeFlowDailyChart() {
         {
           formatter: function (val) {
             return val ? val.toFixed(2) + ' m³' : '0 m³'
+          }
+        },
+        {
+          formatter: function (val) {
+            return val ? val.toFixed(1) + ' mV' : '0 mV'
           }
         },
         {
@@ -3636,6 +3482,888 @@ function initializeFlowDailyChart() {
   flowDailyChart = new ApexCharts(chartEl, options)
   flowDailyChart.render()
   console.log('[Dashboard] Flow Daily Chart initialized')
+}
+
+// Initialize AT-02 Inlet Volume Chart
+let at02InletChart = null
+let at02HourlyChart = null
+let at02ORPChart = null
+let at02LevelChart = null
+let at02LevelData = []
+
+// Initialize AT-02 Level Chart
+function initializeAT02LevelChart() {
+  console.log('[Dashboard] Initializing AT-02 Level Chart...')
+  
+  const chartEl = document.getElementById('chart-at02-level')
+  if (!chartEl) {
+    console.error('[Dashboard] AT-02 Level chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  
+  // Calculate time range: 06:00 today to 06:00 tomorrow (Thailand time)
+  const now = new Date()
+  const thailandNow = new Date(now.getTime() + (7 * 60 * 60 * 1000))
+  
+  // Set to 06:00 tomorrow
+  const endTime = new Date(thailandNow.getFullYear(), thailandNow.getMonth(), thailandNow.getDate() + 1, 6, 0, 0)
+  // If current time is before 06:00, use yesterday 06:00 to today 06:00
+  if (thailandNow.getHours() < 6) {
+    endTime.setDate(endTime.getDate() - 1)
+  }
+  const startTime = new Date(endTime.getTime() - (24 * 60 * 60 * 1000))
+  
+  const options = {
+    series: [{
+      name: 'AT-02 Level',
+      type: 'area',
+      data: []
+    }, {
+      name: 'Moving Average (15min)',
+      type: 'line',
+      data: []
+    }],
+    chart: {
+      type: 'area',
+      height: 350,
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      zoom: {
+        enabled: false
+      },
+      selection: {
+        enabled: false
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff',
+      animations: {
+        enabled: true,
+        easing: 'linear',
+        dynamicAnimation: {
+          speed: 1000
+        }
+      }
+    },
+    dataLabels: {
+      enabled: false
+    },
+    stroke: {
+      curve: 'smooth',
+      width: [2, 3],
+      dashArray: [0, 5]
+    },
+    fill: {
+      type: ['gradient', 'solid'],
+      gradient: {
+        shadeIntensity: 1,
+        opacityFrom: 0.5,
+        opacityTo: 0.1,
+        stops: [0, 90, 100]
+      },
+      opacity: [0.4, 0]
+    },
+    colors: ['#3b82f6', '#f59e0b'],
+    xaxis: {
+      type: 'datetime',
+      labels: {
+        datetimeUTC: false,
+        format: 'HH:mm',
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      },
+      title: {
+        text: 'Time (Last 24 hours)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a'
+        }
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Water Level (m)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(2) : '0.00'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      shared: true,
+      intersect: false,
+      y: {
+        formatter: function(val) {
+          return val ? val.toFixed(3) + ' m' : 'No data'
+        }
+      }
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      labels: {
+        colors: isDark ? '#94a3b8' : '#64748b'
+      }
+    },
+    title: {
+      text: 'AT-02 Water Level - Real-time',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    }
+  }
+  
+  at02LevelChart = new ApexCharts(chartEl, options)
+  at02LevelChart.render()
+  console.log('[Dashboard] AT-02 Level Chart initialized')
+}
+
+// Load AT-02 Level Historical Data
+// Store AT-02 level threshold
+let at02LevelThreshold = -0.005
+
+async function loadAT02LevelData() {
+  console.log('[Dashboard] Loading AT-02 Level historical data...')
+  
+  try {
+    // Load last 24 hours of data
+    const response = await fetch(`${API_BASE_URL}/wwt01/history?minutes=1440&limit=10000`)
+    if (!response.ok) throw new Error('Failed to fetch AT-02 level data')
+    
+    const rows = await response.json()
+    console.log('[loadAT02LevelData] Loaded', rows.length, 'records')
+    
+    // Prepare timeseries data
+    const levelData = []
+    rows.forEach(row => {
+      if (row.at_02_level !== null && row.at_02_level !== undefined) {
+        const timestamp = new Date(row.time).getTime()
+        const levelValue = parseFloat(row.at_02_level)
+        
+        levelData.push({
+          x: timestamp,
+          y: levelValue
+        })
+      }
+    })
+    
+    console.log('[loadAT02LevelData] Prepared', levelData.length, 'data points')
+    
+    // Calculate moving average (15-minute window)
+    const trendData = []
+    const windowSize = 30 // ~15 minutes at 30-second intervals
+    
+    for (let i = 0; i < levelData.length; i++) {
+      const start = Math.max(0, i - Math.floor(windowSize / 2))
+      const end = Math.min(levelData.length, i + Math.ceil(windowSize / 2))
+      const windowPoints = levelData.slice(start, end)
+      
+      if (windowPoints.length > 0) {
+        const avgLevel = windowPoints.reduce((sum, p) => sum + p.y, 0) / windowPoints.length
+        trendData.push({
+          x: levelData[i].x,
+          y: avgLevel
+        })
+      }
+    }
+    
+    console.log('[loadAT02LevelData] Trend data prepared:', trendData.length, 'points')
+    
+    // Find periods where moving average slope goes from positive/zero to negative, then back to zero/positive
+    const annotations = []
+    const volumeLabels = []
+    let inNegativeSlope = false
+    let dropStartIndex = null
+    let dropStartLevel = null
+    
+    for (let i = 1; i < trendData.length; i++) {
+      const currentSlope = trendData[i].y - trendData[i-1].y
+      
+      if (currentSlope < at02LevelThreshold && !inNegativeSlope) {
+        // Slope just turned negative - mark start of outflow
+        inNegativeSlope = true
+        dropStartIndex = i
+        dropStartLevel = levelData[i].y
+        
+        console.log('[loadAT02LevelData] Negative slope started at', 
+                    new Date(trendData[i].x).toLocaleTimeString(),
+                    'Level:', dropStartLevel.toFixed(3))
+        
+        // Add START line (green)
+        annotations.push({
+          x: trendData[i].x,
+          borderColor: '#10b981',
+          strokeDashArray: 5,
+          label: {
+            text: 'Start',
+            style: {
+              color: '#fff',
+              background: '#10b981',
+              fontSize: '11px',
+              fontWeight: 'bold'
+            }
+          }
+        })
+        
+      } else if (currentSlope >= 0 && inNegativeSlope) {
+        // Slope returned to zero/positive - mark end of outflow
+        inNegativeSlope = false
+        const dropEndIndex = i
+        const dropEndLevel = levelData[i].y
+        const totalDrop = dropStartLevel - dropEndLevel
+        const volume = totalDrop * 3500
+        
+        console.log('[loadAT02LevelData] Negative slope ended at', 
+                    new Date(trendData[i].x).toLocaleTimeString(),
+                    'Level:', dropEndLevel.toFixed(3),
+                    'Total drop:', totalDrop.toFixed(3),
+                    'Volume:', volume.toFixed(0), 'L')
+        
+        // Add END line (red)
+        annotations.push({
+          x: trendData[i].x,
+          borderColor: '#ef4444',
+          strokeDashArray: 5,
+          label: {
+            text: 'End',
+            style: {
+              color: '#fff',
+              background: '#ef4444',
+              fontSize: '11px',
+              fontWeight: 'bold'
+            }
+          }
+        })
+        
+        // Add volume label between start and end
+        if (volume > 0 && totalDrop > 0.01) { // Only show if drop > 1cm
+          const midTime = (trendData[dropStartIndex].x + trendData[dropEndIndex].x) / 2
+          const midLevel = (dropStartLevel + dropEndLevel) / 2
+          
+          volumeLabels.push({
+            x: midTime,
+            y: midLevel,
+            label: {
+              borderColor: '#ff4560',
+              style: {
+                color: '#fff',
+                background: '#ff4560',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                padding: {
+                  left: 8,
+                  right: 8,
+                  top: 4,
+                  bottom: 4
+                }
+              },
+              text: `${volume.toFixed(0)} L`
+            }
+          })
+        }
+        
+        dropStartIndex = null
+        dropStartLevel = null
+      }
+    }
+    
+    // Update chart with both series and annotations
+    if (at02LevelChart) {
+      at02LevelChart.updateSeries([{
+        name: 'AT-02 Level',
+        data: levelData
+      }, {
+        name: 'Moving Average (15min)',
+        data: trendData
+      }])
+      
+      // Update annotations
+      at02LevelChart.updateOptions({
+        annotations: {
+          xaxis: annotations,
+          points: volumeLabels
+        }
+      })
+      
+      console.log('[loadAT02LevelData] Found', annotations.length / 2, 'outflow periods (', annotations.length, 'annotations)')
+      console.log('[loadAT02LevelData] Chart updated with', volumeLabels.length, 'volume labels')
+    }
+    
+  } catch (error) {
+    console.error('[Dashboard] Error loading AT-02 level data:', error)
+  }
+}
+
+function initializeAT02InletChart() {
+  console.log('[Dashboard] Initializing AT-02 Inlet Chart...')
+  
+  const chartEl = document.getElementById('chart-at02-inlet')
+  if (!chartEl) {
+    console.error('[Dashboard] AT-02 Inlet chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  const currentYear = new Date().getFullYear()
+  const lastYear = currentYear - 1
+  
+  const options = {
+    series: [{
+      name: currentYear.toString(),
+      data: new Array(12).fill(0)
+    }, {
+      name: lastYear.toString(),
+      data: new Array(12).fill(0)
+    }],
+    chart: {
+      type: 'line',
+      height: 400,
+      toolbar: { 
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff',
+      animations: {
+        enabled: true,
+        easing: 'easeinout',
+        speed: 800
+      }
+    },
+    stroke: {
+      width: [3, 2],
+      curve: 'smooth',
+      dashArray: [0, 5]
+    },
+    colors: ['#3b82f6', '#9ca3af'],
+    fill: {
+      type: 'gradient',
+      gradient: {
+        shade: isDark ? 'dark' : 'light',
+        type: 'vertical',
+        shadeIntensity: 0.1,
+        opacityFrom: 0.4,
+        opacityTo: 0.1
+      }
+    },
+    markers: {
+      size: [4, 4],
+      strokeWidth: 2,
+      hover: {
+        size: 6
+      }
+    },
+    xaxis: {
+      categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      title: {
+        text: 'Month',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Total Outlet Volume (m³)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' m³' : '0 m³'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      shared: true,
+      intersect: false,
+      y: {
+        formatter: function(val) {
+          return val ? val.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' m³' : '0 m³'
+        }
+      }
+    },
+    title: {
+      text: 'AT-02 Outlet Volume - 12 Month Comparison',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      labels: {
+        colors: isDark ? '#94a3b8' : '#64748b'
+      }
+    }
+  }
+  
+  at02InletChart = new ApexCharts(chartEl, options)
+  at02InletChart.render()
+  console.log('[Dashboard] AT-02 Inlet Chart initialized')
+}
+
+// Load AT-02 Inlet Volume Data
+async function loadAT02InletData() {
+  console.log('[Dashboard] Loading AT-02 Inlet data...')
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/wwt01/at02-inlet-monthly`)
+    if (!response.ok) throw new Error('Failed to fetch AT-02 inlet data')
+    
+    const result = await response.json()
+    console.log('[Dashboard] AT-02 Inlet data loaded:', result)
+    
+    if (result.success && result.data) {
+      const currentYear = new Date().getFullYear()
+      const currentMonth = new Date().getMonth() // 0-11
+      
+      // Update chart
+      if (at02InletChart) {
+        at02InletChart.updateSeries([
+          {
+            name: currentYear.toString(),
+            data: result.data.currentYear || new Array(12).fill(0)
+          },
+          {
+            name: (currentYear - 1).toString(),
+            data: result.data.previousYear || new Array(12).fill(0)
+          }
+        ])
+      }
+      
+      // Update totals
+      const currentMonthTotal = result.data.currentYear?.[currentMonth] || 0
+      const lastYearTotal = result.data.previousYear?.[currentMonth] || 0
+      
+      const currentEl = document.getElementById('at02-current-month-total')
+      const lastYearEl = document.getElementById('at02-last-year-total')
+      
+      if (currentEl) {
+        currentEl.textContent = currentMonthTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' m³'
+      }
+      if (lastYearEl) {
+        lastYearEl.textContent = lastYearTotal.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' m³'
+      }
+      
+      console.log('[Dashboard] AT-02 Inlet chart updated')
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error loading AT-02 inlet data:', error)
+  }
+}
+
+// Initialize AT-02 Hourly Accumulation Chart
+function initializeAT02HourlyChart() {
+  console.log('[Dashboard] Initializing AT-02 Hourly Chart...')
+  
+  const chartEl = document.getElementById('chart-at02-hourly')
+  if (!chartEl) {
+    console.error('[Dashboard] AT-02 Hourly chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  
+  // Create 24-hour categories starting from 6 AM
+  const hourCategories = []
+  for (let i = 0; i < 24; i++) {
+    const hour = (6 + i) % 24
+    const hourKey = `${hour.toString().padStart(2, '0')}:00`
+    hourCategories.push(hourKey)
+  }
+  
+  const options = {
+    series: [{
+      name: 'AT-02 Outlet Volume',
+      data: new Array(24).fill(0)
+    }],
+    chart: {
+      type: 'bar',
+      height: 400,
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff'
+    },
+    plotOptions: {
+      bar: {
+        borderRadius: 4,
+        dataLabels: {
+          position: 'top'
+        },
+        colors: {
+          ranges: [{
+            from: 0,
+            to: 999999,
+            color: '#10b981'
+          }]
+        }
+      }
+    },
+    dataLabels: {
+      enabled: true,
+      formatter: function(val) {
+        return val > 0 ? val.toLocaleString('en-US', { maximumFractionDigits: 0 }) : ''
+      },
+      offsetY: -20,
+      style: {
+        fontSize: '10px',
+        colors: [isDark ? '#94a3b8' : '#64748b']
+      }
+    },
+    stroke: {
+      show: true,
+      width: 2,
+      colors: ['transparent']
+    },
+    xaxis: {
+      categories: hourCategories,
+      title: {
+        text: 'Hour of Day (6 AM - 6 AM next day)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a'
+        }
+      },
+      labels: {
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'Outlet Volume (m³)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a'
+        }
+      },
+      min: 0,
+      forceNiceScale: true,
+      labels: {
+        formatter: function(val) {
+          return val ? val.toLocaleString('en-US', { maximumFractionDigits: 1 }) : '0'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      y: {
+        formatter: function(val) {
+          return val ? val.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' m³' : '0 m³'
+        }
+      }
+    },
+    title: {
+      text: 'AT-02 Outlet Volume - Hourly Accumulation (Level Decreases × 3500)',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    }
+  }
+  
+  at02HourlyChart = new ApexCharts(chartEl, options)
+  at02HourlyChart.render()
+  console.log('[Dashboard] AT-02 Hourly Chart initialized')
+}
+
+// Initialize AT-02 ORP Sensors Chart
+function initializeAT02ORPChart() {
+  console.log('[Dashboard] Initializing AT-02 ORP Chart...')
+  
+  const chartEl = document.getElementById('chart-at02-orp-sensors')
+  if (!chartEl) {
+    console.error('[Dashboard] AT-02 ORP chart container not found')
+    return
+  }
+  
+  const isDark = document.documentElement.classList.contains('dark')
+  
+  const options = {
+    series: [{
+      name: 'ORP-03',
+      data: []
+    }, {
+      name: 'ORP-04',
+      data: []
+    }],
+    chart: {
+      type: 'line',
+      height: 400,
+      toolbar: {
+        show: true,
+        tools: {
+          download: true,
+          selection: false,
+          zoom: false,
+          zoomin: false,
+          zoomout: false,
+          pan: false,
+          reset: false
+        }
+      },
+      foreColor: isDark ? '#94a3b8' : '#64748b',
+      background: isDark ? '#1e293b' : '#ffffff',
+      animations: {
+        enabled: true,
+        easing: 'easeinout',
+        speed: 800
+      }
+    },
+    stroke: {
+      width: 3,
+      curve: 'smooth'
+    },
+    colors: ['#10b981', '#f59e0b'],
+    markers: {
+      size: 0,
+      hover: {
+        size: 6
+      }
+    },
+    xaxis: {
+      type: 'datetime',
+      labels: {
+        datetimeUTC: false,
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    yaxis: {
+      title: {
+        text: 'ORP (mV)',
+        style: {
+          color: isDark ? '#cbd5e1' : '#0f172a',
+          fontSize: '12px'
+        }
+      },
+      labels: {
+        formatter: function(val) {
+          return val ? val.toFixed(0) : '0'
+        },
+        style: {
+          colors: isDark ? '#94a3b8' : '#64748b'
+        }
+      }
+    },
+    tooltip: {
+      theme: isDark ? 'dark' : 'light',
+      shared: true,
+      intersect: false,
+      x: {
+        format: 'dd MMM HH:mm'
+      },
+      y: {
+        formatter: function(val) {
+          return val ? val.toFixed(0) + ' mV' : '0 mV'
+        }
+      }
+    },
+    title: {
+      text: 'AT-02 ORP Sensors (ORP-03, ORP-04)',
+      align: 'left',
+      style: {
+        fontSize: '14px',
+        fontWeight: 600,
+        color: isDark ? '#cbd5e1' : '#0f172a'
+      }
+    },
+    grid: {
+      borderColor: isDark ? '#334155' : '#e2e8f0'
+    },
+    legend: {
+      show: true,
+      position: 'top',
+      horizontalAlign: 'right',
+      labels: {
+        colors: isDark ? '#94a3b8' : '#64748b'
+      }
+    }
+  }
+  
+  at02ORPChart = new ApexCharts(chartEl, options)
+  at02ORPChart.render()
+  console.log('[Dashboard] AT-02 ORP Chart initialized')
+}
+
+// Load AT-02 Hourly Accumulation Data
+async function loadAT02HourlyData(selectedDate = null) {
+  console.log('[Dashboard] Loading AT-02 Hourly data...', selectedDate ? 'for date: ' + selectedDate : '')
+  
+  try {
+    let startDate, endDate
+    
+    if (selectedDate) {
+      // Use local date (no timezone conversion needed - Date constructor uses local time)
+      const localDate = new Date(selectedDate + 'T00:00:00')
+      const startTime = new Date(localDate.getFullYear(), localDate.getMonth(), localDate.getDate(), 6, 0, 0)
+      const endTime = new Date(localDate.getFullYear(), localDate.getMonth(), localDate.getDate() + 1, 6, 0, 0)
+      
+      // Convert local time to UTC for API query
+      startDate = new Date(startTime.getTime() - (7 * 60 * 60 * 1000)).toISOString()
+      endDate = new Date(endTime.getTime() - (7 * 60 * 60 * 1000)).toISOString()
+      
+      console.log('[loadAT02HourlyData] Loading from', startTime.toLocaleString(), 'to', endTime.toLocaleString())
+      console.log('[loadAT02HourlyData] UTC Query:', startDate, 'to', endDate)
+    } else {
+      // Get current time in Thailand
+      const now = new Date()
+      const thailandTime = new Date(now.getTime() + (7 * 60 * 60 * 1000)) // UTC + 7
+      const startTime = new Date(thailandTime.getFullYear(), thailandTime.getMonth(), thailandTime.getDate(), 6, 0, 0)
+      const endTime = new Date(thailandTime.getFullYear(), thailandTime.getMonth(), thailandTime.getDate() + 1, 6, 0, 0)
+      
+      // Convert to UTC
+      startDate = new Date(startTime.getTime() - (7 * 60 * 60 * 1000)).toISOString()
+      endDate = new Date(endTime.getTime() - (7 * 60 * 60 * 1000)).toISOString()
+      
+      console.log('[loadAT02HourlyData] Loading today from', startTime.toLocaleString(), 'to', endTime.toLocaleString())
+      console.log('[loadAT02HourlyData] UTC Query:', startDate, 'to', endDate)
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/wwt01/at02-inlet-hourly?startDate=${startDate}&endDate=${endDate}`)
+    if (!response.ok) throw new Error('Failed to fetch AT-02 hourly data')
+    
+    const rows = await response.json()
+    console.log('[loadAT02HourlyData] Loaded', rows.length, 'hours from API')
+    console.log('[loadAT02HourlyData] Raw data:', rows)
+    
+    // Prepare chart data - Start from 6 AM
+    const allHours = []
+    const displayLabels = []
+    const hourlyVolumes = {}
+    
+    // Group data by hour and store details
+    rows.forEach(row => {
+      const date = new Date(row.hour)
+      // Convert UTC to Thailand time (UTC+7)
+      const thailandHour = (date.getUTCHours() + 7) % 24
+      const hourKey = thailandHour.toString().padStart(2, '0')
+      hourlyVolumes[hourKey] = parseFloat(row.volume_outlet) || 0
+    })
+    
+    let datePrefix = ''
+    if (selectedDate) {
+      try {
+        datePrefix = new Date(selectedDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' }) + ' '
+      } catch (e) {
+        console.error('[loadAT02HourlyData] Error formatting date prefix:', e)
+      }
+    }
+    
+    // Create 24-hour array starting from 6 AM
+    for (let i = 0; i < 24; i++) {
+      const hour = (6 + i) % 24
+      const hourKey = hour.toString().padStart(2, '0')
+      allHours.push(hourKey)
+      
+      // Add date prefix to first hour (06:00) or when crossing midnight
+      if (i === 0 || hour === 0) {
+        displayLabels.push(datePrefix + hourKey + ':00')
+      } else {
+        displayLabels.push(hourKey + ':00')
+      }
+    }
+    
+    // Map volumes to hours
+    const volumeValues = allHours.map(hourKey => hourlyVolumes[hourKey] || 0)
+    
+    console.log('[loadAT02HourlyData] Volume values:', volumeValues)
+    
+    // Update chart
+    if (at02HourlyChart) {
+      at02HourlyChart.updateOptions({
+        xaxis: {
+          categories: displayLabels
+        }
+      })
+      
+      at02HourlyChart.updateSeries([{
+        name: 'AT-02 Outlet Volume',
+        data: volumeValues
+      }])
+      
+      console.log('[loadAT02HourlyData] Chart updated with', volumeValues.length, 'values')
+    } else {
+      console.error('[loadAT02HourlyData] Chart not initialized')
+    }
+    
+  } catch (error) {
+    console.error('[Dashboard] Error loading AT-02 hourly data:', error)
+  }
 }
 
 // Load and Update Flow Daily Data (Monthly View)
@@ -3843,7 +4571,7 @@ async function loadFlowDailyData(selectedMonth = null) {
           data: orpAvgValues
         }, {
           name: 'Energy/Flow (kWh/m³)',
-          type: 'line',
+          type: 'bar',
           data: energyPerFlowValues
         }],
         chart: {
@@ -3871,7 +4599,7 @@ async function loadFlowDailyData(selectedMonth = null) {
         },
         dataLabels: {
           enabled: true,
-          enabledOnSeries: [0, 1, 2, 3, 4], // แสดงทุกกราฟ (Flow, ORP-In, ORP-Out, ORP-Avg, Energy/Flow)
+          enabledOnSeries: [0, 1, 2, 3, 4],
           formatter: function (val) {
             return val ? val.toFixed(2) : '0.00'
           },
@@ -3892,8 +4620,8 @@ async function loadFlowDailyData(selectedMonth = null) {
         },
         stroke: {
           show: true,
-          width: [0, 1, 1, 3, 2],
-          colors: ['transparent', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6'],
+          width: [0, 3, 3, 3, 0],
+          colors: ['transparent', '#f59e0b', '#10b981', '#ef4444', 'transparent'],
           curve: 'smooth'
         },
         xaxis: {
@@ -3942,7 +4670,7 @@ async function loadFlowDailyData(selectedMonth = null) {
           },
           labels: {
             formatter: function(val) {
-              return val ? val.toFixed(1) : '0'
+              return val ? val.toFixed(0) : '0'
             },
             style: {
               colors: isDark ? '#94a3b8' : '#64748b'
@@ -3972,8 +4700,8 @@ async function loadFlowDailyData(selectedMonth = null) {
           }
         }],
         fill: {
-          opacity: [1, 0.9, 0.9, 0.9],
-          colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444']
+          opacity: [1, 0.9, 0.9, 0.9, 0.9],
+          colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#f59e0b']
         },
         tooltip: {
           theme: isDark ? 'dark' : 'light',
@@ -4211,6 +4939,15 @@ function updateAllCharts() {
       { data: lohandData.at2.orp.orp04 }
     ])
   }
+  
+  // Update AT-02 ORP Chart (separate chart for AT-02 section)
+  if (at02ORPChart) {
+    at02ORPChart.updateSeries([
+      { name: 'ORP-03', data: lohandData.at2.orp.orp03 },
+      { name: 'ORP-04', data: lohandData.at2.orp.orp04 }
+    ])
+  }
+  
   if (lohandCharts.at2.temp) {
     lohandCharts.at2.temp.updateSeries([
       { data: lohandData.at2.temp.temp03 },
@@ -4283,6 +5020,39 @@ function updateLohandCharts(data) {
   const statusEl = document.getElementById('dashboard-status')
   if (statusEl && hasReceivedData) {
     statusEl.textContent = `Live | Last update: ${new Date().toLocaleTimeString()}`
+  }
+}
+
+// Store level data for real-time updates
+let at02RealtimeLevelData = []
+
+// Update AT-02 Level Chart with real-time MQTT data
+function updateAT02LevelChartRealtime(data) {
+  if (!at02LevelChart) return
+  
+  // Check if at_02_level exists in data
+  if (data.at_02_level !== null && data.at_02_level !== undefined) {
+    const timestamp = new Date().getTime()
+    const levelValue = parseFloat(data.at_02_level)
+    
+    // Add new data point
+    at02RealtimeLevelData.push({
+      x: timestamp,
+      y: levelValue
+    })
+    
+    // Keep only last 2000 points (approximately 2-3 hours)
+    if (at02RealtimeLevelData.length > 2000) {
+      at02RealtimeLevelData.shift()
+    }
+    
+    // Update chart
+    at02LevelChart.updateSeries([{
+      name: 'AT-02 Level',
+      data: at02RealtimeLevelData
+    }], false, true)
+    
+    console.log('[AT-02 Level] Updated:', levelValue.toFixed(3), 'm at', new Date(timestamp).toLocaleTimeString())
   }
 }
 
@@ -4436,14 +5206,46 @@ function setupDashboardHandlers() {
   const flowDailyChartCurrentBtn = document.getElementById('flow-daily-chart-current-btn')
   const flowDailyChartLoadBtn = document.getElementById('flow-daily-chart-load-btn')
   
-  // ML elements
-  const mlTrainBtn = document.getElementById('ml-train-btn')
-  const mlRefreshBtn = document.getElementById('ml-refresh-btn')
+  // AT-02 chart elements
+  const at02ChartDateInput = document.getElementById('at02-chart-date')
+  const at02ChartTodayBtn = document.getElementById('at02-chart-today-btn')
+  const at02ChartLoadBtn = document.getElementById('at02-chart-load-btn')
+  
+  // AT-02 threshold control elements
+  const at02ThresholdInput = document.getElementById('at02-threshold-input')
+  const at02ThresholdApplyBtn = document.getElementById('at02-threshold-apply')
+  
+  // Handle threshold apply button
+  if (at02ThresholdApplyBtn && at02ThresholdInput) {
+    at02ThresholdApplyBtn.addEventListener('click', () => {
+      const newThreshold = parseFloat(at02ThresholdInput.value)
+      if (!isNaN(newThreshold) && newThreshold <= 0) {
+        at02LevelThreshold = newThreshold
+        console.log('[Dashboard] Threshold updated to:', at02LevelThreshold)
+        loadAT02LevelData() // Reload chart with new threshold
+      } else {
+        alert('Please enter a valid negative number for threshold')
+      }
+    })
+    
+    // Allow Enter key to apply threshold
+    at02ThresholdInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        at02ThresholdApplyBtn.click()
+      }
+    })
+  }
   
   // Set default date to today
   if (flowChartDateInput) {
     const today = new Date()
     flowChartDateInput.value = today.toISOString().split('T')[0]
+  }
+  
+  // Set default date to today for AT-02
+  if (at02ChartDateInput) {
+    const today = new Date()
+    at02ChartDateInput.value = today.toISOString().split('T')[0]
   }
   
   // Set default month to current month
@@ -4510,6 +5312,26 @@ function setupDashboardHandlers() {
     })
   }
   
+  // AT-02 Today button handler
+  if (at02ChartTodayBtn) {
+    at02ChartTodayBtn.addEventListener('click', () => {
+      const today = new Date()
+      if (at02ChartDateInput) {
+        at02ChartDateInput.value = today.toISOString().split('T')[0]
+      }
+      loadAT02HourlyData(null) // Load today's data
+    })
+  }
+  
+  // AT-02 Load button handler
+  if (at02ChartLoadBtn) {
+    at02ChartLoadBtn.addEventListener('click', () => {
+      if (at02ChartDateInput && at02ChartDateInput.value) {
+        loadAT02HourlyData(at02ChartDateInput.value)
+      }
+    })
+  }
+  
   if (reloadBtn) {
     reloadBtn.addEventListener('click', () => {
       // Reload with current selected date if any
@@ -4521,8 +5343,9 @@ function setupDashboardHandlers() {
       const selectedMonth = flowDailyChartMonthInput?.value
       loadFlowDailyData(selectedMonth || null)
       
-      // Reload ML prediction
-      loadMLPredictionData()
+      // Reload AT-02 hourly chart
+      const at02SelectedDate = at02ChartDateInput?.value
+      loadAT02HourlyData(at02SelectedDate || null)
     })
   }
   
@@ -4533,27 +5356,6 @@ function setupDashboardHandlers() {
       loadDashboardHistoricalData()
     })
   }
-  
-  // ML Train button
-  if (mlTrainBtn) {
-    mlTrainBtn.addEventListener('click', () => {
-      trainMLModel()
-    })
-  }
-  
-  // ML Refresh button
-  if (mlRefreshBtn) {
-    mlRefreshBtn.addEventListener('click', () => {
-      loadMLPredictionData()
-    })
-  }
-  
-  // Auto-refresh ML prediction every 1 minute
-  setInterval(() => {
-    if (currentPage === 'dashboard') {
-      loadMLPredictionData()
-    }
-  }, 60 * 1000) // 1 minute
 }
 
 // Setup Data History Handlers
@@ -4582,14 +5384,14 @@ async function loadWWT01Data() {
   const tbody = document.getElementById('table-body')
   const apiUrl = `${API_BASE_URL}/wwt01/history?minutes=${timeRange}&limit=${limit}`
   
-  tbody.innerHTML = '<tr><td colspan="34" style="text-align: center; padding: 20px;">Loading data...</td></tr>'
+  tbody.innerHTML = '<tr><td colspan="37" style="text-align: center; padding: 20px;">Loading data...</td></tr>'
   
   try {
     const response = await fetch(apiUrl)
     const data = await response.json()
     
     if (data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="34" style="text-align: center; padding: 20px;">No data available</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="37" style="text-align: center; padding: 20px;">No data available</td></tr>'
       return
     }
     
@@ -4621,12 +5423,15 @@ async function loadWWT01Data() {
         <td>${row.ph_sensor_02?.toFixed(2) || '--'}</td>
         <td>${row.orp_sensor_02?.toFixed(0) || '--'}</td>
         <td>${row.temp_02?.toFixed(1) || '--'}</td>
+        <td>${row.at_01_level ? (row.at_01_level * 3500).toFixed(2) : '--'}</td>
         <td>${row.ph_sensor_03?.toFixed(2) || '--'}</td>
         <td>${row.orp_sensor_03?.toFixed(0) || '--'}</td>
         <td>${row.temp_03?.toFixed(1) || '--'}</td>
         <td>${row.ph_sensor_04?.toFixed(2) || '--'}</td>
         <td>${row.orp_sensor_04?.toFixed(0) || '--'}</td>
         <td>${row.temp_04?.toFixed(1) || '--'}</td>
+        <td>${row.sump_pump_water_level ? (row.sump_pump_water_level * 3500).toFixed(2) : '--'}</td>
+        <td>${row.at_02_level ? (row.at_02_level * 3500).toFixed(2) : '--'}</td>
         <td>${row.ph_sensor_05?.toFixed(2) || '--'}</td>
         <td>${row.orp_sensor_05?.toFixed(0) || '--'}</td>
         <td>${row.temp_05?.toFixed(1) || '--'}</td>
@@ -4653,7 +5458,7 @@ async function loadWWT01Data() {
     })
   } catch (error) {
     console.error('Error loading data:', error)
-    tbody.innerHTML = '<tr><td colspan="34" style="text-align: center; padding: 20px; color: red;">Error loading data</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="37" style="text-align: center; padding: 20px; color: red;">Error loading data</td></tr>'
   }
 }
 
@@ -5329,6 +6134,15 @@ function setupORPAnalysisHandlers() {
 
 // Initialize MQTT connection
 connectMQTT()
+
+// Initialize chat button
+try {
+  const chatButton = createChatButton()
+  console.log('✅ Chat button initialized')
+  window.chatButton = chatButton // Make it accessible globally
+} catch (error) {
+  console.error('❌ Failed to initialize chat button:', error)
+}
 
 // Initialize dashboard on page load
 console.log('[Init] Page loaded, initializing dashboard...')

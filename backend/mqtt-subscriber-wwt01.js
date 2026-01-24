@@ -56,6 +56,14 @@ function parseWWT01Data(data) {
     jsonObject["ORP_Sensor_06"] = registersToFloat(data[55], data[56])
     jsonObject["Temp_06"] = registersToFloat(data[59], data[60])
     
+    // ====== Level Sensors (KM30) ======
+    // AT-01 Level (D1128) - signed decimal 16bit x 0.2
+    jsonObject["AT_01_Level"] = data[128]
+    // Sump Pump Water Level (D1130) - signed decimal 16bit x 0.3
+    jsonObject["Sump_Pump_Water_Level"] = data[130]
+    // AT-02 Level (D1132) - signed decimal 16bit x 0.3
+    jsonObject["AT_02_Level"] = data[132]
+    
     // ====== Supnea flow meter No.4 (Sludge Thickener) ======
     jsonObject["Flow_Meter_No4_RealTime"] = registersToFloat(data[21], data[22])
     jsonObject["Flow_Meter_No4_Forward"] = data[23] // อ่านค่า 16-bit integer เดียว

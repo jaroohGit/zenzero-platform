@@ -1,6 +1,6 @@
 #!/bin/sh
 
-echo "Starting MQTT Broker, WebSocket Bridge, and WWT01 Subscriber..."
+echo "Starting MQTT Broker, WebSocket Bridge, API Server, and WWT01 Subscriber..."
 
 # Start MQTT Broker in background
 node mqtt-broker.js &
@@ -9,6 +9,10 @@ MQTT_PID=$!
 # Start WebSocket Bridge in background
 node websocket-server.js &
 WS_PID=$!
+
+# Start API Server in background
+node api-server.js &
+API_PID=$!
 
 # Start MQTT Subscriber for WWT01 data processing
 echo "Starting MQTT Subscriber for WWT01..."
