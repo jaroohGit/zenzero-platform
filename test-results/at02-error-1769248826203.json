@@ -1,0 +1,24 @@
+{
+  "timestamp": "2026-01-24T10:00:26.203Z",
+  "duration": 0.056,
+  "url": "https://www.zenzerobiogas.com",
+  "results": [
+    {
+      "name": "Test Execution",
+      "passed": false,
+      "details": "Failed to launch the browser process:  Code: 127\n\nstderr:\n/home/teddy/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting\n"
+    }
+  ],
+  "logs": [
+    "[10:00:26] 🚀 Starting AT-02 Water Level Detection Tests",
+    "[10:00:26] 🌐 Target: https://www.zenzerobiogas.com",
+    "[10:00:26] 🌐 Launching headless browser...",
+    "[10:00:26] 💥 Error: Failed to launch the browser process:  Code: 127\n\nstderr:\n/home/teddy/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting\n",
+    "[10:00:26] ❌ Test Execution - Failed to launch the browser process:  Code: 127\n\nstderr:\n/home/teddy/.cache/puppeteer/chrome/linux-144.0.7559.96/chrome-linux64/chrome: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting\n"
+  ],
+  "summary": {
+    "total": 1,
+    "passed": 0,
+    "failed": 1
+  }
+}

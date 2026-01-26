@@ -3314,7 +3314,7 @@ function initializeFlowDailyChart() {
     plotOptions: {
       bar: {
         horizontal: false,
-        columnWidth: '60%',
+        columnWidth: '70%',
         dataLabels: {
           position: 'top'
         }
@@ -3323,22 +3323,22 @@ function initializeFlowDailyChart() {
     dataLabels: {
       enabled: true,
       enabledOnSeries: [0, 1, 2, 3, 4],
-      formatter: function (val) {
+      formatter: function (val, opts) {
         return val ? val.toFixed(2) : '0.00'
       },
       offsetY: -20,
       style: {
-        fontSize: '9px',
-        colors: [isDark ? '#cbd5e1' : '#0f172a']
+        fontSize: '10px',
+        fontWeight: 'bold',
+        colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#f59e0b']
       },
       background: {
         enabled: true,
-        foreColor: isDark ? '#1e293b' : '#ffffff',
-        borderRadius: 2,
-        padding: 3,
-        opacity: 0.9,
-        borderWidth: 1,
-        borderColor: isDark ? '#475569' : '#cbd5e1'
+        foreColor: '#ffffff',
+        borderRadius: 3,
+        padding: 4,
+        opacity: 0.95,
+        borderWidth: 0
       }
     },
     stroke: {
@@ -3521,7 +3521,7 @@ function initializeAT02LevelChart() {
       type: 'area',
       data: []
     }, {
-      name: 'Moving Average (15min)',
+      name: 'Moving Average (60min)',
       type: 'line',
       data: []
     }],
@@ -3647,7 +3647,7 @@ function initializeAT02LevelChart() {
 
 // Load AT-02 Level Historical Data
 // Store AT-02 level threshold
-let at02LevelThreshold = -0.005
+let at02LevelThreshold = -0.0005
 
 async function loadAT02LevelData() {
   console.log('[Dashboard] Loading AT-02 Level historical data...')
@@ -3676,19 +3676,53 @@ async function loadAT02LevelData() {
     
     console.log('[loadAT02LevelData] Prepared', levelData.length, 'data points')
     
-    // Calculate moving average (15-minute window)
-    const trendData = []
-    const windowSize = 30 // ~15 minutes at 30-second intervals
+    // Remove outliers before calculating moving average
+    // ตัด outlier โดยเปรียบเทียบกับค่าข้างเคียง - ถ้าต่างกันมากเกินไปให้ใช้ค่าเฉลี่ย
+    const cleanedData = []
+    const outlierThreshold = 0.15 // ถ้าต่างจากค่าข้างเคียงเกิน 0.15 m ถือว่าเป็น outlier
     
     for (let i = 0; i < levelData.length; i++) {
+      if (i === 0 || i === levelData.length - 1) {
+        // จุดแรกและจุดสุดท้ายเก็บไว้
+        cleanedData.push(levelData[i])
+      } else {
+        const prev = levelData[i - 1].y
+        const current = levelData[i].y
+        const next = levelData[i + 1].y
+        
+        const diffPrev = Math.abs(current - prev)
+        const diffNext = Math.abs(current - next)
+        
+        // ถ้าต่างจากทั้งก่อนหน้าและถัดไปมาก = outlier
+        if (diffPrev > outlierThreshold && diffNext > outlierThreshold) {
+          // ใช้ค่าเฉลี่ยของจุดข้างเคียงแทน
+          cleanedData.push({
+            x: levelData[i].x,
+            y: (prev + next) / 2
+          })
+          console.log('[loadAT02LevelData] Outlier removed at', new Date(levelData[i].x).toLocaleTimeString(), 
+                      'Original:', current.toFixed(3), 'Replaced with:', ((prev + next) / 2).toFixed(3))
+        } else {
+          cleanedData.push(levelData[i])
+        }
+      }
+    }
+    
+    console.log('[loadAT02LevelData] Cleaned data:', cleanedData.length, 'points (outliers removed)')
+    
+    // Calculate moving average (60-minute window for very smooth trend - reduces noise)
+    const trendData = []
+    const windowSize = 120 // ~60 minutes at 30-second intervals - smooth line, no sudden changes
+    
+    for (let i = 0; i < cleanedData.length; i++) {
       const start = Math.max(0, i - Math.floor(windowSize / 2))
-      const end = Math.min(levelData.length, i + Math.ceil(windowSize / 2))
-      const windowPoints = levelData.slice(start, end)
+      const end = Math.min(cleanedData.length, i + Math.ceil(windowSize / 2))
+      const windowPoints = cleanedData.slice(start, end)
       
       if (windowPoints.length > 0) {
         const avgLevel = windowPoints.reduce((sum, p) => sum + p.y, 0) / windowPoints.length
         trendData.push({
-          x: levelData[i].x,
+          x: cleanedData[i].x,
           y: avgLevel
         })
       }
@@ -3696,103 +3730,153 @@ async function loadAT02LevelData() {
     
     console.log('[loadAT02LevelData] Trend data prepared:', trendData.length, 'points')
     
-    // Find periods where moving average slope goes from positive/zero to negative, then back to zero/positive
+    // Enhanced trend detection using Moving Average (60min) with window-based slope
+    // ตรวจจับ downtrend จาก Moving Average โดยใช้ความชันจากช่วงเวลา (window)
+    // เพื่อหาแนวโน้มที่มีนัยสำคัญ ไม่ใช่แค่จุดติดกัน
     const annotations = []
     const volumeLabels = []
-    let inNegativeSlope = false
-    let dropStartIndex = null
-    let dropStartLevel = null
+    const config = {
+      slopeThreshold: at02LevelThreshold,  // ใช้ค่าจาก UI threshold input (default -0.0005)
+      slopeWindowSize: 10,                  // คำนวณความชันจาก 10 จุด (~5 นาที)
+      minConsecutivePoints: 6,              // ต้องลดต่อเนื่อง 6 จุดขึ้นไป
+      minVolumeChange: 100,                 // ต้องลดอย่างน้อย 100 m³
+      recoveryThreshold: 0.0008,            // ต้องกลับตัวชัดเจน (slope >= 0.0008)
+      volumeConversionFactor: 3500          // ค่าคงที่สำหรับคำนวณปริมาตร (m³ ต่อเมตร)
+    }
     
-    for (let i = 1; i < trendData.length; i++) {
-      const currentSlope = trendData[i].y - trendData[i-1].y
+    let consecutiveDownPoints = 0
+    let downtrendStart = null
+    let downtrendPeak = null
+    
+    console.log('[AT-02 Detection] Starting detection with config:', config)
+    console.log('[AT-02 Detection] Trend data points:', trendData.length)
+    console.log('[AT-02 Detection] Timestamp:', new Date().toISOString(), '- v22')
+    
+    for (let i = config.slopeWindowSize; i < trendData.length; i++) {
+      // คำนวณความชันจากการเปลี่ยนแปลงในช่วง slopeWindowSize จุด
+      // เพื่อดูแนวโน้มที่ชัดเจนขึ้น ไม่ใช่แค่จุดติดกัน
+      const windowStart = i - config.slopeWindowSize
+      const levelChange = trendData[i].y - trendData[windowStart].y
       
-      if (currentSlope < at02LevelThreshold && !inNegativeSlope) {
-        // Slope just turned negative - mark start of outflow
-        inNegativeSlope = true
-        dropStartIndex = i
-        dropStartLevel = levelData[i].y
+      // ความชันเฉลี่ยต่อจุด (เพื่อเทียบกับ threshold)
+      const avgSlopePerPoint = levelChange / config.slopeWindowSize
+      
+      // นับจุดที่ลดติดกัน (ใช้ Moving Average สำหรับความแม่นยำ)
+      if (avgSlopePerPoint < config.slopeThreshold) {
+        consecutiveDownPoints++
         
-        console.log('[loadAT02LevelData] Negative slope started at', 
-                    new Date(trendData[i].x).toLocaleTimeString(),
-                    'Level:', dropStartLevel.toFixed(3))
-        
-        // Add START line (green)
-        annotations.push({
-          x: trendData[i].x,
-          borderColor: '#10b981',
-          strokeDashArray: 5,
-          label: {
-            text: 'Start',
-            style: {
-              color: '#fff',
-              background: '#10b981',
-              fontSize: '11px',
-              fontWeight: 'bold'
-            }
+        // เริ่ม downtrend เมื่อลดติดกัน >= minConsecutivePoints
+        if (consecutiveDownPoints === config.minConsecutivePoints && !downtrendStart) {
+          // บันทึกจุดที่ downtrend ยืนยันแล้ว (หลังจาก minConsecutivePoints)
+          downtrendStart = {
+            index: i - consecutiveDownPoints,
+            time: trendData[i - consecutiveDownPoints].x,
+            level: trendData[i - consecutiveDownPoints].y
           }
-        })
-        
-      } else if (currentSlope >= 0 && inNegativeSlope) {
-        // Slope returned to zero/positive - mark end of outflow
-        inNegativeSlope = false
-        const dropEndIndex = i
-        const dropEndLevel = levelData[i].y
-        const totalDrop = dropStartLevel - dropEndLevel
-        const volume = totalDrop * 3500
-        
-        console.log('[loadAT02LevelData] Negative slope ended at', 
-                    new Date(trendData[i].x).toLocaleTimeString(),
-                    'Level:', dropEndLevel.toFixed(3),
-                    'Total drop:', totalDrop.toFixed(3),
-                    'Volume:', volume.toFixed(0), 'L')
-        
-        // Add END line (red)
-        annotations.push({
-          x: trendData[i].x,
-          borderColor: '#ef4444',
-          strokeDashArray: 5,
-          label: {
-            text: 'End',
-            style: {
-              color: '#fff',
-              background: '#ef4444',
-              fontSize: '11px',
-              fontWeight: 'bold'
-            }
-          }
-        })
-        
-        // Add volume label between start and end
-        if (volume > 0 && totalDrop > 0.01) { // Only show if drop > 1cm
-          const midTime = (trendData[dropStartIndex].x + trendData[dropEndIndex].x) / 2
-          const midLevel = (dropStartLevel + dropEndLevel) / 2
           
-          volumeLabels.push({
-            x: midTime,
-            y: midLevel,
-            label: {
-              borderColor: '#ff4560',
-              style: {
-                color: '#fff',
-                background: '#ff4560',
-                fontSize: '12px',
-                fontWeight: 'bold',
-                padding: {
-                  left: 8,
-                  right: 8,
-                  top: 4,
-                  bottom: 4
-                }
+          console.log('[AT-02] ✓ Downtrend START detected at', 
+                      new Date(downtrendStart.time).toLocaleString(),
+                      'Level:', downtrendStart.level.toFixed(3))
+        }
+      } else if (avgSlopePerPoint >= config.recoveryThreshold) {
+        // หยุดลดลง
+        if (downtrendStart && consecutiveDownPoints >= config.minConsecutivePoints) {
+          const endIndex = i - 1
+          const currentLevel = trendData[endIndex].y
+          const levelDrop = downtrendStart.level - currentLevel
+          const volumeChange = levelDrop * config.volumeConversionFactor  // ได้ผลเป็น m³
+          const durationMinutes = (trendData[endIndex].x - downtrendStart.time) / (1000 * 60)
+          
+          // เช็คว่าปริมาณลดลงมากพอหรือไม่
+          if (volumeChange >= config.minVolumeChange) {
+            console.log('[AT-02 Detection] ✓ ANNOTATION ADDED!')
+            console.log('[AT-02 Detection] Downtrend ended at', 
+                        new Date(trendData[endIndex].x).toLocaleTimeString(),
+                        'End level:', currentLevel.toFixed(3),
+                        'Level drop:', levelDrop.toFixed(3), 'm',
+                        'Volume:', volumeChange.toFixed(0), 'm³',
+                        'Duration:', durationMinutes.toFixed(1), 'min')
+            
+            // Add START line (green)
+            annotations.push({
+              x: downtrendStart.time,
+              borderColor: '#10b981',
+              borderWidth: 2,
+              strokeDashArray: 4,
+              label: {
+                text: 'Start Outflow',
+                style: {
+                  color: '#fff',
+                  background: '#10b981',
+                  fontSize: '10px',
+                  fontWeight: 'bold'
+                },
+                orientation: 'horizontal',
+                offsetY: 0
+              }
+            })
+            
+            // Add END line (red)
+            annotations.push({
+              x: trendData[endIndex].x,
+              borderColor: '#ef4444',
+              borderWidth: 2,
+              strokeDashArray: 4,
+              label: {
+                text: 'End Outflow',
+                style: {
+                  color: '#fff',
+                  background: '#ef4444',
+                  fontSize: '10px',
+                  fontWeight: 'bold'
+                },
+                orientation: 'horizontal',
+                offsetY: 0
+              }
+            })
+            
+            // Add volume label between start and end
+            const midTime = (downtrendStart.time + trendData[endIndex].x) / 2
+            const midLevel = (downtrendStart.level + currentLevel) / 2
+            
+            volumeLabels.push({
+              x: midTime,
+              y: midLevel,
+              marker: {
+                size: 0
               },
-              text: `${volume.toFixed(0)} L`
-            }
-          })
+              label: {
+                borderColor: '#ef4444',
+                borderWidth: 0,
+                style: {
+                  color: '#ef4444',
+                  background: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  padding: {
+                    left: 8,
+                    right: 8,
+                    top: 4,
+                    bottom: 4
+                  }
+                },
+                text: `${volumeChange.toFixed(0)} m³`
+              }
+            })
+          }
         }
         
-        dropStartIndex = null
-        dropStartLevel = null
+        // Reset state
+        consecutiveDownPoints = 0
+        downtrendStart = null
+        downtrendPeak = null
       }
     }
+    
+    console.log('\n[AT-02] ========== DETECTION SUMMARY ==========')
+    console.log('[AT-02] Total annotations:', annotations.length)
+    console.log('[AT-02] Total downtrends:', annotations.length / 2)
+    console.log('[AT-02] =========================================\n')
     
     // Update chart with both series and annotations
     if (at02LevelChart) {
@@ -3800,7 +3884,7 @@ async function loadAT02LevelData() {
         name: 'AT-02 Level',
         data: levelData
       }, {
-        name: 'Moving Average (15min)',
+        name: 'Moving Average (60min)',
         data: trendData
       }])
       
@@ -4591,7 +4675,7 @@ async function loadFlowDailyData(selectedMonth = null) {
         plotOptions: {
           bar: {
             horizontal: false,
-            columnWidth: '60%',
+            columnWidth: '70%',
             dataLabels: {
               position: 'top'
             }
@@ -4605,17 +4689,17 @@ async function loadFlowDailyData(selectedMonth = null) {
           },
           offsetY: -20,
           style: {
-            fontSize: '9px',
-            colors: [isDark ? '#cbd5e1' : '#0f172a']
+            fontSize: '10px',
+            fontWeight: 'bold',
+            colors: ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#f59e0b']
           },
           background: {
             enabled: true,
-            foreColor: isDark ? '#1e293b' : '#ffffff',
-            borderRadius: 2,
-            padding: 3,
-            opacity: 0.9,
-            borderWidth: 1,
-            borderColor: isDark ? '#475569' : '#cbd5e1'
+            foreColor: '#ffffff',
+            borderRadius: 3,
+            padding: 4,
+            opacity: 0.95,
+            borderWidth: 0
           }
         },
         stroke: {

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AT-02 Detection Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #1e293b;
+      color: #cbd5e1;
+    }
+    .log {
+      background: #0f172a;
+      padding: 10px;
+      margin: 10px 0;
+      border-left: 3px solid #3b82f6;
+      border-radius: 4px;
+    }
+    .error {
+      border-left-color: #ef4444;
+    }
+    .success {
+      border-left-color: #10b981;
+    }
+    button {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 10px 10px 10px 0;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔍 AT-02 Level Detection Test</h1>
+  <button onclick="testDetection()">Test Detection Algorithm</button>
+  <button onclick="clearLogs()">Clear Logs</button>
+  <div id="logs"></div>
+
+  <script>
+    const API_BASE_URL = 'http://localhost:3001/api';
+    const at02LevelThreshold = -0.005;
+
+    function addLog(message, type = 'log') {
+      const logs = document.getElementById('logs');
+      const log = document.createElement('div');
+      log.className = `log ${type}`;
+      log.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logs.insertBefore(log, logs.firstChild);
+    }
+
+    function clearLogs() {
+      document.getElementById('logs').innerHTML = '';
+    }
+
+    async function testDetection() {
+      addLog('🚀 Starting detection test...');
+      
+      try {
+        // Fetch data
+        addLog('📡 Fetching AT-02 level data (last 24 hours)...');
+        const response = await fetch(`${API_BASE_URL}/wwt01/history?minutes=1440&limit=10000`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const rows = await response.json();
+        addLog(`✓ Loaded ${rows.length} records`, 'success');
+        
+        // Prepare data
+        const levelData = [];
+        rows.forEach(row => {
+          if (row.at_02_level !== null && row.at_02_level !== undefined) {
+            levelData.push({
+              x: new Date(row.time).getTime(),
+              y: parseFloat(row.at_02_level)
+            });
+          }
+        });
+        
+        addLog(`✓ Prepared ${levelData.length} valid data points`, 'success');
+        
+        if (levelData.length === 0) {
+          addLog('⚠ No AT-02 level data available!', 'error');
+          return;
+        }
+        
+        // Calculate moving average
+        const trendData = [];
+        const windowSize = 30;
+        
+        for (let i = 0; i < levelData.length; i++) {
+          const start = Math.max(0, i - Math.floor(windowSize / 2));
+          const end = Math.min(levelData.length, i + Math.ceil(windowSize / 2));
+          const windowPoints = levelData.slice(start, end);
+          
+          if (windowPoints.length > 0) {
+            const avgLevel = windowPoints.reduce((sum, p) => sum + p.y, 0) / windowPoints.length;
+            trendData.push({
+              x: levelData[i].x,
+              y: avgLevel
+            });
+          }
+        }
+        
+        addLog(`✓ Calculated moving average: ${trendData.length} points`, 'success');
+        
+        // Run detection algorithm
+        const config = {
+          slopeThreshold: at02LevelThreshold,
+          minConsecutivePoints: 3,
+          minVolumeChange: 50,
+          recoveryThreshold: 0.001
+        };
+        
+        addLog(`📊 Detection config: threshold=${config.slopeThreshold}, minPoints=${config.minConsecutivePoints}, minVolume=${config.minVolumeChange}L`);
+        
+        let consecutiveDownPoints = 0;
+        let downtrendStart = null;
+        let detectedPeriods = 0;
+        
+        for (let i = 1; i < trendData.length; i++) {
+          const currentSlope = trendData[i].y - trendData[i-1].y;
+          
+          if (currentSlope < config.slopeThreshold) {
+            consecutiveDownPoints++;
+            
+            if (consecutiveDownPoints >= config.minConsecutivePoints && !downtrendStart) {
+              const peakIndex = Math.max(0, i - consecutiveDownPoints);
+              downtrendStart = {
+                index: peakIndex,
+                time: trendData[peakIndex].x,
+                level: trendData[peakIndex].y
+              };
+              
+              addLog(`🟢 Downtrend START at ${new Date(downtrendStart.time).toLocaleString()} | Level: ${downtrendStart.level.toFixed(3)}m | Consecutive: ${consecutiveDownPoints}`, 'success');
+            }
+          } else if (currentSlope >= config.recoveryThreshold) {
+            if (downtrendStart && consecutiveDownPoints >= config.minConsecutivePoints) {
+              const currentLevel = trendData[i].y;
+              const levelDrop = downtrendStart.level - currentLevel;
+              const volumeChange = levelDrop * 3500;
+              const durationMinutes = (trendData[i].time - downtrendStart.time) / (1000 * 60);
+              
+              if (volumeChange >= config.minVolumeChange) {
+                detectedPeriods++;
+                addLog(`🔴 Downtrend END at ${new Date(trendData[i].time).toLocaleString()} | Level: ${currentLevel.toFixed(3)}m | Drop: ${levelDrop.toFixed(3)}m | Volume: ${volumeChange.toFixed(0)}L | Duration: ${durationMinutes.toFixed(1)}min`, 'success');
+              } else {
+                addLog(`⚠ Downtrend ended but volume too small: ${volumeChange.toFixed(0)}L < ${config.minVolumeChange}L`);
+              }
+            }
+            
+            consecutiveDownPoints = 0;
+            downtrendStart = null;
+          }
+        }
+        
+        addLog(`✅ Detection complete! Found ${detectedPeriods} outflow periods`, 'success');
+        
+        if (detectedPeriods === 0) {
+          addLog('ℹ️ No outflow periods detected in the last 24 hours. This could mean:', 'error');
+          addLog('  • Water level has been stable (no significant drops)', 'error');
+          addLog('  • Threshold is too strict (try adjusting -0.005 to -0.01)', 'error');
+          addLog('  • minVolumeChange is too high (try lowering from 50L)', 'error');
+        }
+        
+      } catch (error) {
+        addLog(`❌ Error: ${error.message}`, 'error');
+        console.error(error);
+      }
+    }
+  </script>
+</body>
+</html>
