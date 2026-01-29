@@ -44,6 +44,7 @@ docker-compose up -d
 ## 📚 Documentation
 
 - **[VPS_DEPLOYMENT.md](./VPS_DEPLOYMENT.md)** - Complete guide for deploying to a VPS and running shell scripts
+- **[QUICK_REFERENCE.md](./QUICK_REFERENCE.md)** - Quick command reference for common operations
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Local development setup and workflow
 - **[DOMAIN_SETUP.md](./DOMAIN_SETUP.md)** - Configure custom domain with SSL
 - **[WEBSOCKET_SETUP.md](./WEBSOCKET_SETUP.md)** - WebSocket configuration guide
@@ -275,6 +276,7 @@ For issues, questions, or contributions:
 
 **Quick Links:**
 - [Deploy to VPS](./VPS_DEPLOYMENT.md) 🚀
+- [Quick Reference](./QUICK_REFERENCE.md) ⚡
 - [Local Development](./DEVELOPMENT.md) 💻
 - [Domain Setup](./DOMAIN_SETUP.md) 🌐
 - [Testing Guide](./DETECTION_TESTING.md) 🧪
