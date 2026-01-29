@@ -162,14 +162,27 @@ npm install
 
 ## Production Deployment
 
+### Deploy to VPS (Recommended)
+
+For complete VPS deployment with automated setup:
+```bash
+# Run the deployment script on your VPS
+./deploy-to-vps.sh
+```
+
+See the comprehensive guide: [VPS_DEPLOYMENT.md](./VPS_DEPLOYMENT.md)
+
+### Manual Docker Deployment
+
 สำหรับ deploy จริง ใช้:
 ```bash
 docker-compose up -d
 ```
 
 อ่านเพิ่มเติมที่:
-- [DOMAIN_SETUP.md](./DOMAIN_SETUP.md)
-- [WEBSOCKET_SETUP.md](./WEBSOCKET_SETUP.md)
+- [VPS_DEPLOYMENT.md](./VPS_DEPLOYMENT.md) - **Complete VPS deployment guide**
+- [DOMAIN_SETUP.md](./DOMAIN_SETUP.md) - Domain and SSL configuration
+- [WEBSOCKET_SETUP.md](./WEBSOCKET_SETUP.md) - WebSocket setup
 
 ---
 
